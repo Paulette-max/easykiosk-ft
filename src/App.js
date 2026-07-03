@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
 import { 
   ClerkProvider, 
   SignInButton, 
@@ -28,7 +28,7 @@ const ProtectedRoute = ({ children }) => {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
   const queryClient = useQueryClient(); 
-
+  
   useEffect(() => {
     if (!isSignedIn) {
       queryClient.clear(); // React Query
@@ -50,6 +50,12 @@ const ProtectedRoute = ({ children }) => {
 
   
 };
+
+function ProtectedApp() {
+  const { userId } = useAuth();
+
+  return <AppContent key={userId} />;
+}
 
 // --- LANDING PAGE (Public) ---
 function LandingPage() {
@@ -87,20 +93,13 @@ function AppContent() {
   const [activePage, setActivePage] = useState('dashboard');
   const { isSignedIn } = useAuth();
   const queryClient = useQueryClient();
-  const [products, setProducts] = useState([]);
-  const [sales, setSales] = useState([]);
 
-  useEffect(() => {
-  if (!isSignedIn) {
-    queryClient.clear();
-    localStorage.clear();
-    sessionStorage.clear();
-
-    // Reset any React state here as well
-    setProducts([]);
-    setSales([]);
-    
-  }
+  
+  
+useEffect(() => {
+    if (!isSignedIn) {
+        queryClient.clear();
+    }
 }, [isSignedIn]);
 
   return (
@@ -165,6 +164,7 @@ function Dashboard() {
   const [stats, setStats] = useState({ revenue: 0, profit: 0, stockValue: 0, lowStockCount: 0 });
   const [recentSales, setRecentSales] = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
+  const { getToken } = useAuth();
 
   useEffect(() => {
     fetchData();
@@ -172,21 +172,27 @@ function Dashboard() {
 
   const fetchData = async () => {
     try {
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+
       const [productsRes, salesRes] = await Promise.all([
-        axios.get(`${API_URL}/products`),
-        axios.get(`${API_URL}/sales`)
+        axios.get(`${API_URL}/products`, { headers }),
+        axios.get(`${API_URL}/sales`, { headers })
       ]);
 
       const products = productsRes.data;
       const sales = salesRes.data;
 
-      const revenue = sales.reduce((sum, s) => sum + s.total, 0);
+      const revenue = sales.reduce((sum, s) => sum + Number(s.total || 0), 0);
+      
       const profit = sales.reduce((sum, s) => {
-        const p = products.find(x => x._id === s.productId);
-        return sum + (p ? (s.price - p.cost) * s.qty : 0);
+        const p = products.find(x => x.id === s.productId);
+        return sum + (p ? (Number(s.price) - Number(p.cost)) * Number(s.qty) : 0);
       }, 0);
-      const stockValue = products.reduce((sum, p) => sum + p.stock * p.cost, 0);
-      const lowStock = products.filter(p => p.stock <= p.threshold);
+
+      const stockValue = products.reduce((sum, p) => sum + Number(p.stock) * Number(p.cost || 0), 0);
+      
+      const lowStock = products.filter(p => Number(p.stock) <= Number(p.threshold));
 
       setStats({
         revenue,
@@ -194,10 +200,11 @@ function Dashboard() {
         stockValue: Math.round(stockValue),
         lowStockCount: lowStock.length
       });
+      
       setRecentSales(sales.slice(0, 5));
       setLowStockItems(lowStock);
     } catch (err) {
-      console.error(err);
+      console.error("Dashboard fetch error:", err);
     }
   };
 
@@ -234,10 +241,10 @@ function Dashboard() {
             <thead><tr><th>Product</th><th>Qty</th><th>Total</th><th>Date</th></tr></thead>
             <tbody>
               {recentSales.map(s => (
-                <tr key={s._id}>
-                  <td>{s.productId?.name || 'Unknown'}</td>
+                <tr key={s.id}>
+                  <td>{s.productName || 'Unknown'}</td>
                   <td>{s.qty}</td>
-                  <td>KES {s.total.toLocaleString()}</td>
+                  <td>KES {Number(s.total).toLocaleString()}</td>
                   <td>{new Date(s.date).toLocaleDateString()}</td>
                 </tr>
               ))}
@@ -250,7 +257,7 @@ function Dashboard() {
             <thead><tr><th>Product</th><th>Stock</th><th>Threshold</th></tr></thead>
             <tbody>
               {lowStockItems.map(p => (
-                <tr key={p._id}>
+                <tr key={p.id}>
                   <td>{p.name}</td>
                   <td style={{ color: '#E24B4A', fontWeight: 'bold' }}>{p.stock}</td>
                   <td>{p.threshold}</td>
@@ -262,7 +269,7 @@ function Dashboard() {
       </div>
     </div>
   );
-}
+} 
 
 function Products() {
   const [products, setProducts] = useState([]);
@@ -272,6 +279,7 @@ function Products() {
   const [filterCat, setFilterCat] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const { getToken } = useAuth();
   const [formData, setFormData] = useState({
     name: '', sku: '', catId: '', supplierId: '', price: 0, cost: 0, stock: 0, threshold: 10, unit: 'pcs'
   });
@@ -280,20 +288,40 @@ function Products() {
     fetchData();
   }, []);
 
+
   const fetchData = async () => {
-    const [pRes, cRes, sRes] = await Promise.all([
-      axios.get(`${API_URL}/products`),
-      axios.get(`${API_URL}/categories`),
-      axios.get(`${API_URL}/suppliers`)
-    ]);
+    const token = await getToken();
+
+const [pRes, cRes, sRes] = await Promise.all([
+    axios.get(`${API_URL}/products`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    }),
+    axios.get(`${API_URL}/categories`, {
+    headers: {
+        Authorization: `Bearer ${token}`,
+    },
+}),
+    axios.get(`${API_URL}/suppliers`, {
+    headers: {
+        Authorization: `Bearer ${token}`,
+    },
+})
+]);
     setProducts(pRes.data);
-    setCategories(cRes.data);
     setSuppliers(sRes.data);
-  };
+    setCategories(cRes.data);
+  }; 
 
   const handleDelete = async (id) => {
     if (window.confirm('Delete this product?')) {
-      await axios.delete(`${API_URL}/products/${id}`);
+      const token = await getToken();
+      await axios.delete(`${API_URL}/products/${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       fetchData();
     }
   };
@@ -310,11 +338,27 @@ function Products() {
       threshold: parseInt(formData.threshold)
     };
 
-    if (editingId) {
-      await axios.put(`${API_URL}/products/${editingId}`, payload);
-    } else {
-      await axios.post(`${API_URL}/products`, payload);
-    }
+    const token = await getToken();
+
+const config = {
+  headers: {
+    Authorization: `Bearer ${token}`,
+  },
+};
+
+if (editingId) {
+  await axios.put(
+    `${API_URL}/products/${editingId}`,
+    payload,
+    config
+  );
+} else {
+  await axios.post(
+    `${API_URL}/products`,
+    payload,
+    config
+  );
+}
     setShowModal(false);
     setEditingId(null);
     setFormData({ name: '', sku: '', catId: '', supplierId: '', price: 0, cost: 0, stock: 0, threshold: 10, unit: 'pcs' });
@@ -322,10 +366,12 @@ function Products() {
   };
 
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || (p.sku || "").toLowerCase().includes(search.toLowerCase());
     const matchesCat = filterCat ? p.catId === parseInt(filterCat) : true;
     return matchesSearch && matchesCat;
   });
+
+  
 
   return (
     <div>
@@ -463,18 +509,26 @@ function Sales() {
   const [products, setProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [saleData, setSaleData] = useState({ productId: '', qty: 1, customer: 'Walk-in' });
+  const { getToken } = useAuth();
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const [sRes, pRes] = await Promise.all([
-      axios.get(`${API_URL}/sales`),
-      axios.get(`${API_URL}/products`)
-    ]);
-    setSales(sRes.data);
-    setProducts(pRes.data);
+    try {
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      
+      const [sRes, pRes] = await Promise.all([
+        axios.get(`${API_URL}/sales`, { headers }),
+        axios.get(`${API_URL}/products`, { headers })
+      ]);
+      setSales(sRes.data);
+      setProducts(pRes.data);
+    } catch (err) {
+      console.error("Sales fetch error:", err);
+    }
   };
 
   const handleSale = async (e) => {
@@ -490,7 +544,8 @@ function Sales() {
     };
 
     try {
-      await axios.post(`${API_URL}/sales`, payload);
+      const token = await getToken();
+      await axios.post(`${API_URL}/sales`, payload, { headers: { Authorization: `Bearer ${token}` } });
       setShowModal(false);
       fetchData();
     } catch (err) {
@@ -498,7 +553,8 @@ function Sales() {
     }
   };
 
-  const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
+  const totalRevenue = sales.reduce((sum, s) => sum + Number(s.total || 0), 0);
+
 
   return (
     <div>
@@ -525,7 +581,7 @@ function Sales() {
                 <td>{s.productName || '-'}</td>
                 <td>{s.customer}</td>
                 <td>{s.qty}</td>
-                <td><strong>KES {s.total.toLocaleString()}</strong></td>
+                <td><strong>KES {Number(s.total).toLocaleString()}</strong></td>
               </tr>
             ))}
           </tbody>
@@ -539,24 +595,19 @@ function Sales() {
             <form onSubmit={handleSale}>
               <div className="form-group">
                 <label>Product</label>
-                <select required value={saleData.productId}
-                  onChange={e => setSaleData({ ...saleData, productId: e.target.value })}>
+                <select required value={saleData.productId} onChange={e => setSaleData({...saleData, productId: e.target.value})}>
                   <option value="">Select Product</option>
-                  {products.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} (KES {p.price})</option>
-                  ))}
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} (KES {p.price})</option>)}
                 </select>
               </div>
               <div className="form-row">
                 <div className="form-group">
                   <label>Quantity</label>
-                  <input type="number" min="1" required value={saleData.qty}
-                    onChange={e => setSaleData({ ...saleData, qty: parseInt(e.target.value) })} />
+                  <input type="number" min="1" required value={saleData.qty} onChange={e => setSaleData({...saleData, qty: parseInt(e.target.value)})} />
                 </div>
                 <div className="form-group">
                   <label>Customer</label>
-                  <input value={saleData.customer}
-                    onChange={e => setSaleData({ ...saleData, customer: e.target.value })} />
+                  <input value={saleData.customer} onChange={e => setSaleData({...saleData, customer: e.target.value})} />
                 </div>
               </div>
               <div className="modal-footer">
@@ -572,32 +623,64 @@ function Sales() {
 }
 
 
+
 function StockMoves() {
   const [moves, setMoves] = useState([]);
   const [products, setProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [moveData, setMoveData] = useState({ productId: '', type: 'in', qty: 0, note: '' });
+  const { getToken } = useAuth();
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const [mRes, pRes] = await Promise.all([axios.get(`${API_URL}/stock-moves`), axios.get(`${API_URL}/products`)]);
-    setMoves(mRes.data);
-    setProducts(pRes.data);
+    try {
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      
+      const [mRes, pRes] = await Promise.all([
+        axios.get(`${API_URL}/stock-moves`, { headers }),
+        axios.get(`${API_URL}/products`, { headers })
+      ]);
+      setMoves(mRes.data);
+      setProducts(pRes.data);
+    } catch (err) {
+      console.error("Stock moves fetch error:", err);
+    }
   };
 
   const handleMove = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/stock-moves`, moveData);
+      const token = await getToken();
+      await axios.post(`${API_URL}/stock-moves`, moveData, { headers: { Authorization: `Bearer ${token}` } });
       setShowModal(false);
       fetchData();
     } catch (err) {
       alert(err.response?.data?.error || 'Error recording movement');
     }
   };
+
+  const handleDelete = async (id) => {
+  if (!window.confirm("Delete this stock movement?")) return;
+
+  try {
+    const token = await getToken();
+
+    await axios.delete(`${API_URL}/stock-moves/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    fetchData();
+  } catch (err) {
+    console.error(err);
+    alert(err.response?.data?.error || "Failed to delete stock movement");
+  }
+};
 
   return (
     <div>
@@ -606,20 +689,37 @@ function StockMoves() {
       </div>
       <div className="card">
         <table className="table">
-          <thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Note</th></tr></thead>
+          <thead><tr><th>Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Note</th><th>Actions</th></tr></thead>
           <tbody>
             {moves.map(m => (
-              <tr key={m._id}>
-                <td>{new Date(m.date).toLocaleDateString()}</td>
-                <td>{m.productId?.name || '-'}</td>
-                <td>
-                  <span className={`badge ${m.type === 'in' ? 'badge-success' : 'badge-danger'}`}>
-                    {m.type === 'in' ? 'Stock In' : 'Stock Out'}
-                  </span>
-                </td>
-                <td>{m.qty}</td>
-                <td>{m.note}</td>
-              </tr>
+              <tr key={m.id}>
+  <td>{new Date(m.date).toLocaleDateString()}</td>
+
+  <td>{m.productName || "-"}</td>
+
+  <td>
+    <span
+      className={`badge ${
+        m.type === "in" ? "badge-success" : "badge-danger"
+      }`}
+    >
+      {m.type === "in" ? "Stock In" : "Stock Out"}
+    </span>
+  </td>
+
+  <td>{m.qty}</td>
+
+  <td>{m.note}</td>
+
+  <td>
+    <button
+      className="btn btn-sm btn-danger"
+      onClick={() => handleDelete(m.id)}
+    >
+      Delete
+    </button>
+  </td>
+</tr>
             ))}
           </tbody>
         </table>
@@ -634,7 +734,7 @@ function StockMoves() {
                 <label>Product</label>
                 <select required value={moveData.productId} onChange={e => setMoveData({...moveData, productId: e.target.value})}>
                   <option value="">Select Product</option>
-                  {products.map(p => <option key={p._id} value={p._id}>{p.name} (Current: {p.stock})</option>)}
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} (Current: {p.stock})</option>)}
                 </select>
               </div>
               <div className="form-row">
@@ -670,35 +770,72 @@ function Categories() {
   const [categories, setCategories] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [formData, setFormData] = useState({ name: '', desc: '' });
+  const { getToken } = useAuth();
+  const [formData, setFormData] = useState({ name: '', description: '' });
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const res = await axios.get(`${API_URL}/categories`);
-    setCategories(res.data);
-  };
+    const token = await getToken();
+
+  const res = await axios.get(`${API_URL}/categories`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  setCategories(res.data);
+};
 
   const handleDelete = async (id) => {
+    const token = await getToken();
     if (window.confirm('Delete this category?')) {
-      await axios.delete(`${API_URL}/categories/${id}`);
+      await axios.delete(`${API_URL}/categories/${id}`, {
+        headers:{
+            Authorization:`Bearer ${token}`
+        }
+    });
       fetchData();
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editingId) {
-      await axios.put(`${API_URL}/categories/${editingId}`, formData);
-      setEditingId(null);
-    } else {
-      await axios.post(`${API_URL}/categories`, formData);
-    }
-    setShowModal(false);
-    setFormData({ name: '', desc: '' });
-    fetchData();
+
+  const token = await getToken();
+
+  if (editingId) {
+    await axios.put(
+      `${API_URL}/categories/${editingId}`,
+      formData,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+  } else {
+    await axios.post(
+      `${API_URL}/categories`,
+      formData,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+  }
+
+  setShowModal(false);
+  setEditingId(null);
+  setFormData({
+    name: "",
+    description: "",
+  });
+
+  fetchData();
   };
 
   return (
@@ -711,12 +848,12 @@ function Categories() {
           <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
           <tbody>
             {categories.map(c => (
-              <tr key={c._id}>
+              <tr key={c.id}>
                 <td><strong>{c.name}</strong></td>
-                <td>{c.desc}</td>
+                <td>{c.description}</td>
                 <td>
-                  <button className="btn btn-sm" onClick={() => { setEditingId(c._id); setFormData(c); setShowModal(true); }}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(c._id)}>Del</button>
+                  <button className="btn btn-sm" onClick={() => { setEditingId(c.id); setFormData(c); setShowModal(true); }}>Edit</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(c.id)}>Del</button>
                 </td>
               </tr>
             ))}
@@ -734,7 +871,7 @@ function Categories() {
               </div>
               <div className="form-group">
                 <label>Description</label>
-                <input value={formData.desc} onChange={e => setFormData({...formData, desc: e.target.value})} />
+                <input value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
@@ -753,33 +890,65 @@ function Suppliers() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({ name: '', contact: '', phone: '', email: '', addr: '' });
-
+  const { getToken } = useAuth();
+  
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const res = await axios.get(`${API_URL}/suppliers`);
+    const token = await getToken();
+
+const res = await axios.get(
+    `${API_URL}/suppliers`,
+    {
+        headers:{
+            Authorization:`Bearer ${token}`
+        }
+    }
+);
     setSuppliers(res.data);
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Delete this supplier?')) {
-      await axios.delete(`${API_URL}/suppliers/${id}`);
+  if (window.confirm('Delete this supplier?')) {
+    try {
+      const token = await getToken();
+      await axios.delete(`${API_URL}/suppliers/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       fetchData();
+    } catch (err) {
+      // Display the specific error message from the backend
+      alert(err.response?.data?.error || 'Error deleting supplier');
     }
-  };
+  }
+};
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editingId) {
-      await axios.put(`${API_URL}/suppliers/${editingId}`, formData);
-    } else {
-      await axios.post(`${API_URL}/suppliers`, formData);
-    }
-    setShowModal(false);
-    setEditingId(null);
-    setFormData({ name: '', contact: '', phone: '', email: '', addr: '' });
+    const token = await getToken();
+
+if (editingId) {
+    await axios.put(
+        `${API_URL}/suppliers/${editingId}`,
+        formData,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        }
+    );
+} else {
+    await axios.post(
+        `${API_URL}/suppliers`,
+        formData,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        }
+    );
+}
     fetchData();
   };
 
@@ -793,14 +962,14 @@ function Suppliers() {
           <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Actions</th></tr></thead>
           <tbody>
             {suppliers.map(s => (
-              <tr key={s._id}>
+              <tr key={s.id}>
                 <td><strong>{s.name}</strong><br/><small>{s.addr}</small></td>
                 <td>{s.contact}</td>
                 <td>{s.phone}</td>
                 <td>{s.email}</td>
                 <td>
-                  <button className="btn btn-sm" onClick={() => { setEditingId(s._id); setFormData(s); setShowModal(true); }}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(s._id)}>Del</button>
+                  <button className="btn btn-sm" onClick={() => { setEditingId(s.id); setFormData(s); setShowModal(true); }}>Edit</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(s.id)}>Del</button>
                 </td>
               </tr>
             ))}
@@ -849,13 +1018,23 @@ function Suppliers() {
 function Alerts() {
   const [products, setProducts] = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
+  const { getToken } = useAuth();
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const res = await axios.get(`${API_URL}/products`);
+    const token = await getToken();
+
+    const res = await axios.get(
+    `${API_URL}/products`,
+    {
+        headers:{
+            Authorization:`Bearer ${token}`
+        }
+    }
+);
     const low = res.data.filter(p => p.stock <= p.threshold);
     setProducts(res.data);
     setLowStockItems(low);
@@ -872,7 +1051,7 @@ function Alerts() {
             <thead><tr><th>Product</th><th>Stock</th><th>Threshold</th><th>Deficit</th></tr></thead>
             <tbody>
               {lowStockItems.map(p => (
-                <tr key={p._id}>
+                <tr key={p.id}>
                   <td><strong>{p.name}</strong></td>
                   <td style={{ color: '#E24B4A', fontWeight: 'bold' }}>{p.stock}</td>
                   <td>{p.threshold}</td>
@@ -902,7 +1081,7 @@ function App() {
           ) : (
             /* Protected Route */
             <ProtectedRoute>
-              <AppContent />
+              <ProtectedApp />
             </ProtectedRoute>
           )}
         </div>
