@@ -264,10 +264,20 @@ function Products() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const payload = {
+      ...formData,
+      catId: parseInt(formData.catId),
+      supplierId: parseInt(formData.supplierId),
+      price: parseFloat(formData.price),
+      cost: parseFloat(formData.cost),
+      stock: parseInt(formData.stock),
+      threshold: parseInt(formData.threshold)
+    };
+
     if (editingId) {
-      await axios.put(`${API_URL}/products/${editingId}`, formData);
+      await axios.put(`${API_URL}/products/${editingId}`, payload);
     } else {
-      await axios.post(`${API_URL}/products`, formData);
+      await axios.post(`${API_URL}/products`, payload);
     }
     setShowModal(false);
     setEditingId(null);
@@ -277,7 +287,7 @@ function Products() {
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase());
-    const matchesCat = filterCat ? p.catId === filterCat : true;
+    const matchesCat = filterCat ? p.catId === parseInt(filterCat) : true;
     return matchesSearch && matchesCat;
   });
 
@@ -291,21 +301,22 @@ function Products() {
           <input placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} />
           <select value={filterCat} onChange={e => setFilterCat(e.target.value)}>
             <option value="">All Categories</option>
-            {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <table className="table">
           <thead>
             <tr>
-              <th>Product</th><th>SKU</th><th>Category</th><th>Stock</th><th>Price</th><th>Status</th><th>Actions</th>
+              <th>Product</th><th>SKU</th><th>Category</th><th>Supplier</th><th>Stock</th><th>Price</th><th>Status</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredProducts.map(p => (
-              <tr key={p._id}>
+              <tr key={p.id}>
                 <td><strong>{p.name}</strong></td>
                 <td>{p.sku}</td>
-                <td>{p.catId?.name || '-'}</td>
+                <td>{p.category?.name || '-'}</td>
+                <td>{p.supplier?.name || '-'}</td>
                 <td>{p.stock} {p.unit}</td>
                 <td>KES {p.price}</td>
                 <td>
@@ -314,8 +325,8 @@ function Products() {
                   </span>
                 </td>
                 <td>
-                  <button className="btn btn-sm" onClick={() => { setEditingId(p._id); setFormData(p); setShowModal(true); }}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p._id)}>Del</button>
+                  <button className="btn btn-sm" onClick={() => { setEditingId(p.id); setFormData(p); setShowModal(true); }}>Edit</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p.id)}>Del</button>
                 </td>
               </tr>
             ))}
@@ -324,100 +335,122 @@ function Products() {
       </div>
 
       {showModal && (
-        <div className="modal-bg" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>{editingId ? 'Edit Product' : 'Add Product'}</h3>
-            <form onSubmit={handleSubmit}>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Name</label>
-                  <input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                </div>
-                <div className="form-group">
-                  <label>SKU</label>
-                  <input value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Category</label>
-                  <select value={formData.catId} onChange={e => setFormData({...formData, catId: e.target.value})}>
-                    <option value="">Select Category</option>
-                    {categories.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Supplier</label>
-                  <select value={formData.supplierId} onChange={e => setFormData({...formData, supplierId: e.target.value})}>
-                    <option value="">Select Supplier</option>
-                    {suppliers.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Price (KES)</label>
-                  <input type="number" value={formData.price} onChange={e => setFormData({...formData, price: parseFloat(e.target.value)})} />
-                </div>
-                <div className="form-group">
-                  <label>Cost (KES)</label>
-                  <input type="number" value={formData.cost} onChange={e => setFormData({...formData, cost: parseFloat(e.target.value)})} />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Stock</label>
-                  <input type="number" value={formData.stock} onChange={e => setFormData({...formData, stock: parseInt(e.target.value)})} />
-                </div>
-                <div className="form-group">
-                  <label>Threshold</label>
-                  <input type="number" value={formData.threshold} onChange={e => setFormData({...formData, threshold: parseInt(e.target.value)})} />
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Unit</label>
-                <select value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}>
-                  <option>pcs</option><option>kg</option><option>litre</option><option>pack</option><option>box</option>
-                </select>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save</button>
-              </div>
-            </form>
+  <div className="modal-bg" onClick={() => setShowModal(false)}>
+    <div className="modal" onClick={e => e.stopPropagation()}>
+      <h3>{editingId ? 'Edit Product' : 'Add Product'}</h3>
+      <form onSubmit={handleSubmit}>
+        <div className="form-row">
+          <div className="form-group">
+            <label>Name</label>
+            <input required value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>SKU</label>
+            <input value={formData.sku}
+              onChange={e => setFormData({ ...formData, sku: e.target.value })} />
           </div>
         </div>
-      )}
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Category</label>
+            <select value={formData.catId}
+              onChange={e => setFormData({ ...formData, catId: e.target.value })}>
+              <option value="">Select Category</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Supplier</label>
+            <select value={formData.supplierId}
+              onChange={e => setFormData({ ...formData, supplierId: e.target.value })}>
+              <option value="">Select Supplier</option>
+              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Price (KES)</label>
+            <input type="number" value={formData.price}
+              onChange={e => setFormData({ ...formData, price: parseFloat(e.target.value) })} />
+          </div>
+          <div className="form-group">
+            <label>Cost (KES)</label>
+            <input type="number" value={formData.cost}
+              onChange={e => setFormData({ ...formData, cost: parseFloat(e.target.value) })} />
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Stock</label>
+            <input type="number" value={formData.stock}
+              onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) })} />
+          </div>
+          <div className="form-group">
+            <label>Threshold</label>
+            <input type="number" value={formData.threshold}
+              onChange={e => setFormData({ ...formData, threshold: parseInt(e.target.value) })} />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>Unit</label>
+          <select value={formData.unit}
+            onChange={e => setFormData({ ...formData, unit: e.target.value })}>
+            <option>pcs</option>
+            <option>kg</option>
+            <option>litre</option>
+            <option>pack</option>
+            <option>box</option>
+          </select>
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
+          <button type="submit" className="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
     </div>
   );
 }
+
 
 function Sales() {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
-  const [saleData, setSaleData] = useState({ productId: '', qty: 1, price: 0, customer: 'Walk-in' });
+  const [saleData, setSaleData] = useState({ productId: '', qty: 1, customer: 'Walk-in' });
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
-    const [sRes, pRes] = await Promise.all([axios.get(`${API_URL}/sales`), axios.get(`${API_URL}/products`)]);
+    const [sRes, pRes] = await Promise.all([
+      axios.get(`${API_URL}/sales`),
+      axios.get(`${API_URL}/products`)
+    ]);
     setSales(sRes.data);
     setProducts(pRes.data);
   };
 
   const handleSale = async (e) => {
     e.preventDefault();
-    const product = products.find(p => p._id === saleData.productId);
+    const product = products.find(p => p.id === parseInt(saleData.productId));
     if (!product) return;
+
     const payload = {
-      ...saleData,
-      productId: saleData.productId,
+      productId: parseInt(saleData.productId),
+      qty: Number(saleData.qty),
       price: product.price,
-      qty: Number(saleData.qty) || 0,
-      total: (Number(saleData.qty) || 0) * Number(product.price || 0)
+      customer: saleData.customer
     };
 
     try {
@@ -451,9 +484,9 @@ function Sales() {
           <thead><tr><th>Date</th><th>Product</th><th>Customer</th><th>Qty</th><th>Total</th></tr></thead>
           <tbody>
             {sales.map(s => (
-              <tr key={s._id}>
+              <tr key={s.id}>
                 <td>{new Date(s.date).toLocaleDateString()}</td>
-                <td>{s.productId?.name || '-'}</td>
+                <td>{s.productName || '-'}</td>
                 <td>{s.customer}</td>
                 <td>{s.qty}</td>
                 <td><strong>KES {s.total.toLocaleString()}</strong></td>
@@ -470,19 +503,24 @@ function Sales() {
             <form onSubmit={handleSale}>
               <div className="form-group">
                 <label>Product</label>
-                <select required value={saleData.productId} onChange={e => setSaleData({...saleData, productId: e.target.value})}>
+                <select required value={saleData.productId}
+                  onChange={e => setSaleData({ ...saleData, productId: e.target.value })}>
                   <option value="">Select Product</option>
-                  {products.map(p => <option key={p._id} value={p._id}>{p.name} (KES {p.price})</option>)}
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} (KES {p.price})</option>
+                  ))}
                 </select>
               </div>
               <div className="form-row">
                 <div className="form-group">
                   <label>Quantity</label>
-                  <input type="number" min="1" required value={saleData.qty} onChange={e => setSaleData({...saleData, qty: parseInt(e.target.value)})} />
+                  <input type="number" min="1" required value={saleData.qty}
+                    onChange={e => setSaleData({ ...saleData, qty: parseInt(e.target.value) })} />
                 </div>
                 <div className="form-group">
                   <label>Customer</label>
-                  <input value={saleData.customer} onChange={e => setSaleData({...saleData, customer: e.target.value})} />
+                  <input value={saleData.customer}
+                    onChange={e => setSaleData({ ...saleData, customer: e.target.value })} />
                 </div>
               </div>
               <div className="modal-footer">
@@ -496,6 +534,7 @@ function Sales() {
     </div>
   );
 }
+
 
 function StockMoves() {
   const [moves, setMoves] = useState([]);
