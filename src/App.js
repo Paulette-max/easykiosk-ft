@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { 
   ClerkProvider, 
   SignInButton, 
@@ -13,14 +14,28 @@ import axios from 'axios';
 import './App.css';
 
 
+const queryClient = new QueryClient();
+
 const PUBLISHABLE_KEY = "pk_test_ZGVmaW5pdGUtbWFrby0yMi5jbGVyay5hY2NvdW50cy5kZXYk"; 
 
 const API_URL = "http://localhost:5000/api";
+
 
 // --- AUTH GUARD COMPONENT ---
 // This wraps the main app content. If the user isn't signed in, it redirects to sign-in.
 const ProtectedRoute = ({ children }) => {
   const { isLoaded, isSignedIn } = useAuth();
+  const [products, setProducts] = useState([]);
+  const [sales, setSales] = useState([]);
+  const queryClient = useQueryClient(); 
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      queryClient.clear(); // React Query
+      setProducts([]);
+      setSales([]);
+    }
+  }, [isSignedIn]);
 
   if (!isLoaded) {
     return <div className="app" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
@@ -32,6 +47,8 @@ const ProtectedRoute = ({ children }) => {
   }
 
   return children;
+
+  
 };
 
 // --- LANDING PAGE (Public) ---
@@ -46,6 +63,8 @@ function LandingPage() {
   if (isSignedIn) {
     return <Navigate to="/" replace />;
   }
+
+ 
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: '#f5f7fa' }}>
@@ -66,6 +85,23 @@ function LandingPage() {
 // --- MAIN APP CONTENT (Protected) ---
 function AppContent() {
   const [activePage, setActivePage] = useState('dashboard');
+  const { isSignedIn } = useAuth();
+  const queryClient = useQueryClient();
+  const [products, setProducts] = useState([]);
+  const [sales, setSales] = useState([]);
+
+  useEffect(() => {
+  if (!isSignedIn) {
+    queryClient.clear();
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // Reset any React state here as well
+    setProducts([]);
+    setSales([]);
+    
+  }
+}, [isSignedIn]);
 
   return (
     <div className="app">
@@ -853,8 +889,11 @@ function Alerts() {
 
 // --- ROOT APP EXPORT ---
 function App() {
+
   return (
+    
     <ClerkProvider publishableKey="pk_test_ZGVmaW5pdGUtbWFrby0yMi5jbGVyay5hY2NvdW50cy5kZXYk">
+      <QueryClientProvider client={queryClient}>
       <Router>
         {/* Public Route */}
         <div className="route-wrapper">
@@ -868,7 +907,9 @@ function App() {
           )}
         </div>
       </Router>
+      </QueryClientProvider>
     </ClerkProvider>
+    
   );
 }
 
