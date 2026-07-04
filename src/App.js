@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { 
   ClerkProvider, 
   SignInButton, 
   SignUpButton, 
   UserButton, 
   useAuth,
-  RedirectToSignIn,
-  Show
+  useUser,
+  RedirectToSignIn
 } from '@clerk/react';
 import axios from 'axios';
 import './App.css';
@@ -16,26 +15,63 @@ import './App.css';
 
 const queryClient = new QueryClient();
 
-const PUBLISHABLE_KEY = "pk_test_ZGVmaW5pdGUtbWFrby0yMi5jbGVyay5hY2NvdW50cy5kZXYk"; 
-
 const API_URL = "http://localhost:5000/api";
+const ADMIN_SESSION_STORAGE_KEY = 'easykiosk_admin_session';
+const ADMIN_API_URL = `${API_URL}/admin`;
+
+function loadAdminSession() {
+  try {
+    const storedSession = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
+    return storedSession ? JSON.parse(storedSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveAdminSession(session) {
+  window.localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+function clearAdminSession() {
+  window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+}
+
+function buildAdminHeaders(token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function formatDate(value) {
+  if (!value) {
+    return '-';
+  }
+
+  const parsedDate = new Date(value);
+
+  return Number.isNaN(parsedDate.getTime()) ? '-' : parsedDate.toLocaleString();
+}
+
+function getUserDisplayName(user) {
+  return user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'Admin';
+}
+
+function isAdministratorUser(user) {
+  const roleValue = user?.publicMetadata?.role || user?.unsafeMetadata?.role || user?.publicMetadata?.isAdmin;
+
+  return roleValue === 'admin' || roleValue === true || roleValue === 'true';
+}
 
 
 // --- AUTH GUARD COMPONENT ---
 // This wraps the main app content. If the user isn't signed in, it redirects to sign-in.
 const ProtectedRoute = ({ children }) => {
   const { isLoaded, isSignedIn } = useAuth();
-  const [products, setProducts] = useState([]);
-  const [sales, setSales] = useState([]);
   const queryClient = useQueryClient(); 
   
   useEffect(() => {
     if (!isSignedIn) {
       queryClient.clear(); // React Query
-      setProducts([]);
-      setSales([]);
     }
-  }, [isSignedIn]);
+  }, [isSignedIn, queryClient]);
 
   if (!isLoaded) {
     return <div className="app" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
@@ -51,45 +87,480 @@ const ProtectedRoute = ({ children }) => {
   
 };
 
-function ProtectedApp() {
+function ProtectedApp({ onAdminAccess }) {
   const { userId } = useAuth();
 
-  return <AppContent key={userId} />;
+  return <AppContent key={userId} onAdminAccess={onAdminAccess} />;
+}
+
+function AppShell() {
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { user } = useUser();
+  const [adminSession, setAdminSession] = useState(() => loadAdminSession());
+  const [adminEntryMode, setAdminEntryMode] = useState('none');
+
+  useEffect(() => {
+    if (adminSession) {
+      saveAdminSession(adminSession);
+    } else {
+      clearAdminSession();
+    }
+  }, [adminSession]);
+
+  const handleAdminSignedIn = (session) => {
+    setAdminEntryMode('none');
+    setAdminSession(session);
+  };
+
+  const handleAdminSignOut = () => {
+    setAdminEntryMode('none');
+    setAdminSession(null);
+  };
+
+  const openAdminConsole = async () => {
+    if (isAdministratorUser(user)) {
+      const token = await getToken();
+
+      setAdminSession({
+        token: token || '',
+        username: getUserDisplayName(user),
+        role: 'admin',
+        source: 'clerk'
+      });
+      setAdminEntryMode('none');
+      return;
+    }
+
+    setAdminEntryMode('signin');
+  };
+
+  if (!isLoaded) {
+    return <div className="app loading-screen">Loading...</div>;
+  }
+
+  if (adminSession) {
+    return (
+      <AdminConsole
+        session={adminSession}
+        onSignOut={handleAdminSignOut}
+      />
+    );
+  }
+
+  if (isSignedIn) {
+    if (adminEntryMode === 'signin') {
+      return <LandingPage onAdminSignedIn={handleAdminSignedIn} initialEntryMode="admin" />;
+    }
+
+    return (
+      <ProtectedRoute>
+        <ProtectedApp onAdminAccess={openAdminConsole} />
+      </ProtectedRoute>
+    );
+  }
+
+  return <LandingPage onAdminSignedIn={handleAdminSignedIn} initialEntryMode="choose" />;
 }
 
 // --- LANDING PAGE (Public) ---
-function LandingPage() {
-  const { isLoaded, isSignedIn } = useAuth();
+function LandingPage({ onAdminSignedIn, initialEntryMode = 'choose' }) {
+  const [entryMode, setEntryMode] = useState(initialEntryMode);
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  if (!isLoaded) {
-    return <div>Loading...</div>;
-  }
+  const handleAdminSubmit = async (event) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError('');
 
-  // If they are already signed in, send them straight to the app
-  if (isSignedIn) {
-    return <Navigate to="/" replace />;
-  }
+    try {
+      const response = await axios.post(`${ADMIN_API_URL}/login`, credentials);
+      const session = {
+        token: response.data?.token || response.data?.accessToken || '',
+        username: response.data?.username || credentials.username,
+        role: 'admin'
+      };
 
- 
+      onAdminSignedIn(session);
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || 'Unable to sign in as admin. Check the username and password.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: '#f5f7fa' }}>
-      <h1>Easy Kiosk</h1>
-      <p>Inventory Management System</p>
-      <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
-        <SignInButton mode="modal">
-          <button className="btn btn-primary" style={{ padding: '10px 20px', fontSize: '16px' }}>Sign In</button>
-        </SignInButton>
-        <SignUpButton mode="modal">
-          <button className="btn" style={{ padding: '10px 20px', border: '1px solid #ccc', fontSize: '16px' }}>Sign Up</button>
-        </SignUpButton>
+    <div className="entry-screen">
+      <div className="entry-card">
+        <div className="entry-brand">
+          <div className="entry-mark">EasyKiosk</div>
+          <h1>Inventory management for the whole kiosk team</h1>
+          <p>Choose your access path first, then sign in with the right account type.</p>
+        </div>
+
+        {entryMode === 'choose' && (
+          <div className="entry-choice-grid">
+            <button type="button" className="entry-choice" onClick={() => setEntryMode('user')}>
+              <span className="entry-choice-kicker">Staff or customer</span>
+              <strong>Regular user login</strong>
+              <small>Go to the Clerk sign in and sign up flow.</small>
+            </button>
+            <button type="button" className="entry-choice entry-choice-admin" onClick={() => setEntryMode('admin')}>
+              <span className="entry-choice-kicker">Management</span>
+              <strong>Admin access</strong>
+              <small>Enter the admin username and password to manage users.</small>
+            </button>
+          </div>
+        )}
+
+        {entryMode === 'user' && (
+          <div className="entry-panel">
+            <p className="entry-panel-title">Continue as a regular user</p>
+            <div className="entry-actions">
+              <SignInButton mode="modal">
+                <button className="btn btn-primary entry-action-btn">Sign In</button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="btn entry-action-btn">Sign Up</button>
+              </SignUpButton>
+            </div>
+            <button type="button" className="entry-back" onClick={() => setEntryMode('choose')}>
+              Back
+            </button>
+          </div>
+        )}
+
+        {entryMode === 'admin' && (
+          <form className="entry-panel entry-form" onSubmit={handleAdminSubmit}>
+            <p className="entry-panel-title">Admin sign in</p>
+            <div className="form-group">
+              <label className="form-label">Admin username</label>
+              <input
+                required
+                autoComplete="username"
+                value={credentials.username}
+                onChange={(event) => setCredentials({ ...credentials, username: event.target.value })}
+                placeholder="Enter admin username"
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Admin password</label>
+              <input
+                required
+                type="password"
+                autoComplete="current-password"
+                value={credentials.password}
+                onChange={(event) => setCredentials({ ...credentials, password: event.target.value })}
+                placeholder="Enter admin password"
+              />
+            </div>
+            {error && <div className="form-error">{error}</div>}
+            <div className="entry-actions">
+              <button type="submit" className="btn btn-primary entry-action-btn" disabled={isSubmitting}>
+                {isSubmitting ? 'Signing in...' : 'Enter admin console'}
+              </button>
+            </div>
+            <button type="button" className="entry-back" onClick={() => setEntryMode('choose')}>
+              Back
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
 }
 
+function AdminConsole({ session, onSignOut }) {
+  return (
+    <div className="app admin-app">
+      <div className="sidebar admin-sidebar">
+        <div className="logo">Easy<span>Kiosk</span></div>
+        <div className="admin-badge">Admin console</div>
+        <nav>
+          <div className="nav-item active">
+            <span>👥</span> Users
+          </div>
+          <div className="nav-item" onClick={onSignOut} role="button" tabIndex={0}>
+            <span>↩</span> Sign out
+          </div>
+        </nav>
+      </div>
+
+      <div className="main">
+        <div className="topbar">
+          <div>
+            <div className="topbar-title">Admin users</div>
+            <div className="topbar-subtitle">Signed in as {session.username}</div>
+          </div>
+          <button className="btn" onClick={onSignOut}>Sign out</button>
+        </div>
+
+        <div className="content">
+          <AdminUsersPanel session={session} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminUsersPanel({ session }) {
+  const [users, setUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [actionId, setActionId] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
+  useEffect(() => {
+    fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.token]);
+
+  const fetchUsers = async () => {
+    setError('');
+    setIsLoading(true);
+
+    try {
+      const response = await axios.get(`${ADMIN_API_URL}/users`, {
+        headers: buildAdminHeaders(session.token)
+      });
+
+      setUsers(Array.isArray(response.data) ? response.data : response.data?.users || []);
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || 'Unable to load admin users. Confirm the admin API is available.');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  const refreshUsers = async () => {
+    setIsRefreshing(true);
+    await fetchUsers();
+  };
+
+  const openUserDetails = async (user) => {
+    setSelectedUser(user);
+    setDetailsLoading(true);
+
+    try {
+      const response = await axios.get(`${ADMIN_API_URL}/users/${user.id}`, {
+        headers: buildAdminHeaders(session.token)
+      });
+
+      setSelectedUser(response.data);
+    } catch {
+      setSelectedUser(user);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const updateUserStatus = async (user, action) => {
+    const confirmationMessage = action === 'delete'
+      ? `Delete ${user.name || user.email || 'this user'}?`
+      : `${action === 'deactivate' ? 'Deactivate' : 'Reactivate'} ${user.name || user.email || 'this user'}?`;
+
+    if (!window.confirm(confirmationMessage)) {
+      return;
+    }
+
+    setActionId(user.id);
+
+    try {
+      if (action === 'delete') {
+        await axios.delete(`${ADMIN_API_URL}/users/${user.id}`, {
+          headers: buildAdminHeaders(session.token)
+        });
+      } else {
+        await axios.patch(`${ADMIN_API_URL}/users/${user.id}/${action}`, {}, {
+          headers: buildAdminHeaders(session.token)
+        });
+      }
+
+      await fetchUsers();
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || `Unable to ${action} the selected user.`);
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const filteredUsers = users.filter((user) => {
+    const searchableText = `${user.name || ''} ${user.email || ''} ${user.phone || ''}`.toLowerCase();
+    const matchesSearch = searchableText.includes(search.toLowerCase());
+    const matchesStatus = statusFilter === 'all' ? true : String(user.status || 'active').toLowerCase() === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const totalUsers = users.length;
+  const activeUsers = users.filter((user) => String(user.status || 'active').toLowerCase() === 'active').length;
+  const deactivatedUsers = users.filter((user) => String(user.status || '').toLowerCase() === 'inactive').length;
+
+  return (
+    <div>
+      <div className="metrics admin-metrics">
+        <div className="metric success">
+          <div className="metric-label">Total users</div>
+          <div className="metric-value">{totalUsers}</div>
+        </div>
+        <div className="metric">
+          <div className="metric-label">Active</div>
+          <div className="metric-value">{activeUsers}</div>
+        </div>
+        <div className="metric alert">
+          <div className="metric-label">Inactive</div>
+          <div className="metric-value">{deactivatedUsers}</div>
+        </div>
+      </div>
+
+      {error && <div className="alert-banner admin-alert">{error}</div>}
+
+      <div className="card">
+        <div className="search-bar admin-search-bar">
+          <input
+            placeholder="Search users by name, email, or phone..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <button className="btn" onClick={refreshUsers} disabled={isRefreshing}>
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="empty">Loading users...</div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="empty">No users match the current filters.</div>
+        ) : (
+          <table className="table admin-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Last login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredUsers.map((user) => {
+                const status = String(user.status || 'active').toLowerCase();
+                const canReactivate = status === 'inactive';
+
+                return (
+                  <tr key={user.id}>
+                    <td>
+                      <strong>{user.name || user.fullName || 'Unnamed user'}</strong>
+                      <br />
+                      <small>{user.phone || user.username || user.id}</small>
+                    </td>
+                    <td>{user.email || '-'}</td>
+                    <td>{user.role || 'User'}</td>
+                    <td>
+                      <span className={`badge ${status === 'active' ? 'badge-success' : 'badge-gray'}`}>
+                        {status === 'active' ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td>{formatDate(user.lastLoginAt || user.updatedAt || user.createdAt)}</td>
+                    <td>
+                      <div className="admin-row-actions">
+                        <button className="btn btn-sm" onClick={() => openUserDetails(user)}>
+                          View
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          disabled={actionId === user.id}
+                          onClick={() => updateUserStatus(user, canReactivate ? 'reactivate' : 'deactivate')}
+                        >
+                          {actionId === user.id ? 'Working...' : canReactivate ? 'Reactivate' : 'Deactivate'}
+                        </button>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          disabled={actionId === user.id}
+                          onClick={() => updateUserStatus(user, 'delete')}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {selectedUser && (
+        <div className="modal-bg" onClick={() => setSelectedUser(null)}>
+          <div className="modal admin-detail-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>User details</h3>
+            <div className="detail-modal-body">
+              {detailsLoading ? (
+                <div className="empty">Loading details...</div>
+              ) : (
+                <div className="details-grid">
+                  <div>
+                    <span className="detail-label">Name</span>
+                    <strong>{selectedUser.name || selectedUser.fullName || 'Unnamed user'}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">Email</span>
+                    <strong>{selectedUser.email || '-'}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">Phone</span>
+                    <strong>{selectedUser.phone || '-'}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">Role</span>
+                    <strong>{selectedUser.role || 'User'}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">Status</span>
+                    <strong>{selectedUser.status || 'active'}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">Created</span>
+                    <strong>{formatDate(selectedUser.createdAt)}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">Last login</span>
+                    <strong>{formatDate(selectedUser.lastLoginAt)}</strong>
+                  </div>
+                  <div>
+                    <span className="detail-label">User ID</span>
+                    <strong>{selectedUser.id}</strong>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-primary" onClick={() => setSelectedUser(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- MAIN APP CONTENT (Protected) ---
-function AppContent() {
+function AppContent({ onAdminAccess }) {
   const [activePage, setActivePage] = useState('dashboard');
   const { isSignedIn } = useAuth();
   const queryClient = useQueryClient();
@@ -100,7 +571,7 @@ useEffect(() => {
     if (!isSignedIn) {
         queryClient.clear();
     }
-}, [isSignedIn]);
+}, [isSignedIn, queryClient]);
 
   return (
     <div className="app">
@@ -111,6 +582,9 @@ useEffect(() => {
           
           {/* Auth Controls in Top Bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <button type="button" className="admin-link" onClick={onAdminAccess}>
+              Admin
+            </button>
             <UserButton afterSignOutUrl="/" />
           </div>
         </div>
@@ -1016,7 +1490,6 @@ if (editingId) {
 }
 
 function Alerts() {
-  const [products, setProducts] = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
   const { getToken } = useAuth();
 
@@ -1036,7 +1509,6 @@ function Alerts() {
     }
 );
     const low = res.data.filter(p => p.stock <= p.threshold);
-    setProducts(res.data);
     setLowStockItems(low);
   };
 
@@ -1073,19 +1545,7 @@ function App() {
     
     <ClerkProvider publishableKey="pk_test_ZGVmaW5pdGUtbWFrby0yMi5jbGVyay5hY2NvdW50cy5kZXYk">
       <QueryClientProvider client={queryClient}>
-      <Router>
-        {/* Public Route */}
-        <div className="route-wrapper">
-          {!window.location.pathname.startsWith('/') ? (
-            <LandingPage />
-          ) : (
-            /* Protected Route */
-            <ProtectedRoute>
-              <ProtectedApp />
-            </ProtectedRoute>
-          )}
-        </div>
-      </Router>
+        <AppShell />
       </QueryClientProvider>
     </ClerkProvider>
     
