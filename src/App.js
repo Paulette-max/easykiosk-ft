@@ -106,59 +106,38 @@ function AppShell() {
     }
   }, [adminSession]);
 
-  const handleAdminSignedIn = (session) => {
-    setAdminEntryMode('none');
-    setAdminSession(session);
-  };
-
-  const handleAdminSignOut = () => {
-    setAdminEntryMode('none');
-    setAdminSession(null);
-  };
-
-  const openAdminConsole = async () => {
-    if (isAdministratorUser(user)) {
-      const token = await getToken();
-
-      setAdminSession({
-        token: token || '',
-        username: getUserDisplayName(user),
-        role: 'admin',
-        source: 'clerk'
-      });
-      setAdminEntryMode('none');
-      return;
-    }
-
-    setAdminEntryMode('signin');
-  };
-
-  if (!isLoaded) {
+    if (!isLoaded) {
     return <div className="app loading-screen">Loading...</div>;
   }
 
-  if (adminSession) {
-    return (
-      <AdminConsole
-        session={adminSession}
-        onSignOut={handleAdminSignOut}
-      />
-    );
+  if (!isSignedIn) {
+    // Simple landing page with just Sign In / Sign Up
+    return <LandingPageSimple />;
   }
 
-  if (isSignedIn) {
-    if (adminEntryMode === 'signin') {
-      return <LandingPage onAdminSignedIn={handleAdminSignedIn} initialEntryMode="admin" />;
-    }
+  // If signed in, go to main app. We can add an "Admin" link in the sidebar/topbar
+  // that fetches admin users IF they are authorized.
+  return (
+    <ProtectedRoute>
+      <AppContent />
+    </ProtectedRoute>
+  );
+}
 
-    return (
-      <ProtectedRoute>
-        <ProtectedApp onAdminAccess={openAdminConsole} />
-      </ProtectedRoute>
-    );
-  }
-
-  return <LandingPage onAdminSignedIn={handleAdminSignedIn} initialEntryMode="choose" />;
+// Simple Landing Page without Admin Choice
+function LandingPageSimple() {
+  const { openSignIn, openSignUp } = useClerk();
+  
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: '#f5f7fa' }}>
+      <h1>Easy Kiosk</h1>
+      <p>Inventory Management System</p>
+      <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+        <button onClick={() => openSignIn()} className="btn btn-primary">Sign In</button>
+        <button onClick={() => openSignUp()} className="btn">Sign Up</button>
+      </div>
+    </div>
+  );
 }
 
 // --- LANDING PAGE (Public) ---
@@ -325,7 +304,7 @@ function AdminConsole({ session, onSignOut }) {
   );
 }
 
-function AdminUsersPanel({ session }) {
+function AdminUsersPanel({session }) {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -335,27 +314,23 @@ function AdminUsersPanel({ session }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [actionId, setActionId] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const { getToken } = useAuth(); 
 
   useEffect(() => {
     fetchUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.token]);
+  }, []);
 
   const fetchUsers = async () => {
-    setError('');
-    setIsLoading(true);
-
     try {
-      const response = await axios.get(`${ADMIN_API_URL}/users`, {
-        headers: buildAdminHeaders(session.token)
+      const token = await getToken();
+      const response = await axios.get(`${API_URL}/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-
-      setUsers(Array.isArray(response.data) ? response.data : response.data?.users || []);
-    } catch (requestError) {
-      setError(requestError.response?.data?.error || 'Unable to load admin users. Confirm the admin API is available.');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      setUsers(response.data);
+    } catch (err) {
+      console.error(err);
+      // Handle error
     }
   };
 
@@ -369,19 +344,18 @@ function AdminUsersPanel({ session }) {
     setDetailsLoading(true);
 
     try {
-      const response = await axios.get(`${ADMIN_API_URL}/users/${user.id}`, {
-        headers: buildAdminHeaders(session.token)
+      const token = await getToken();
+      const response = await axios.get(`${API_URL}/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-
-      setSelectedUser(response.data);
-    } catch {
-      setSelectedUser(user);
-    } finally {
-      setDetailsLoading(false);
+      setUsers(response.data);
+    } catch (err) {
+      console.error(err);
+      // Handle error
     }
   };
 
-  const updateUserStatus = async (user, action) => {
+    const updateUserStatus = async (user, action) => {
     const confirmationMessage = action === 'delete'
       ? `Delete ${user.name || user.email || 'this user'}?`
       : `${action === 'deactivate' ? 'Deactivate' : 'Reactivate'} ${user.name || user.email || 'this user'}?`;
@@ -393,13 +367,16 @@ function AdminUsersPanel({ session }) {
     setActionId(user.id);
 
     try {
+      // Ensure session.token is used for BOTH requests
+      const headers = buildAdminHeaders(session.token);
+
       if (action === 'delete') {
         await axios.delete(`${ADMIN_API_URL}/users/${user.id}`, {
-          headers: buildAdminHeaders(session.token)
+          headers: headers
         });
       } else {
         await axios.patch(`${ADMIN_API_URL}/users/${user.id}/${action}`, {}, {
-          headers: buildAdminHeaders(session.token)
+          headers: headers
         });
       }
 
@@ -410,6 +387,7 @@ function AdminUsersPanel({ session }) {
       setActionId(null);
     }
   };
+
 
   const filteredUsers = users.filter((user) => {
     const searchableText = `${user.name || ''} ${user.email || ''} ${user.phone || ''}`.toLowerCase();
@@ -585,14 +563,27 @@ function AppContent({ onAdminAccess }) {
   const [activePage, setActivePage] = useState('dashboard');
   const { isSignedIn } = useAuth();
   const queryClient = useQueryClient();
+  const [showAdmin, setShowAdmin] = useState(false);
+  const { getToken } = useAuth();
+
 
   
-  
-useEffect(() => {
+  useEffect(() => {
     if (!isSignedIn) {
         queryClient.clear();
     }
-}, [isSignedIn, queryClient]);
+  }, [isSignedIn, queryClient]);
+
+  const handleAdminClick = async () => {
+    try {
+      const token = await getToken(); // From useAuth()
+      // Try to fetch admin users. If fails, user isn't admin.
+      await axios.get(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${token}` } });
+      setShowAdmin(true);
+    } catch (err) {
+      alert('You do not have admin privileges.');
+    }
+  };
 
   return (
     <div className="app">
@@ -600,17 +591,20 @@ useEffect(() => {
       <div className="main">
         <div className="topbar">
           <div className="topbar-title">{activePage.charAt(0).toUpperCase() + activePage.slice(1)}</div>
-          
-          {/* Auth Controls in Top Bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <button type="button" className="admin-link" onClick={onAdminAccess}>
-              Admin
-            </button>
+            {/* Add Admin Button */}
+            <button className="btn btn-sm" onClick={handleAdminClick}>Admin Panel</button>
+            
             <UserButton afterSignOutUrl="/" />
           </div>
         </div>
         
         <div className="content">
+          {showAdmin ? (
+             // Render Admin Panel directly here
+             <AdminUsersPanel /> 
+          ) : (
+            <>
           {activePage === 'dashboard' && <Dashboard />}
           {activePage === 'reports' && <Reports />}
           {activePage === 'products' && <Products />}
@@ -619,11 +613,14 @@ useEffect(() => {
           {activePage === 'categories' && <Categories />}
           {activePage === 'suppliers' && <Suppliers />}
           {activePage === 'alerts' && <Alerts />}
+          </>
+          )}
         </div>
       </div>
     </div>
   );
-}
+} 
+
 
 // --- EXISTING COMPONENTS (Unchanged Logic) ---
 
