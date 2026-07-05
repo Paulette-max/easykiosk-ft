@@ -1,0 +1,10 @@
+{
+  "adminAccount": {
+    "username": "admin",
+    "displayName": "Admin User",
+    "salt": "a490f99f856ef5dfef568084ab658bd0",
+    "passwordHash": "010ef3f77c656789ebf818b70c868b2a16cf3c370abfe1d7783cb9da3ba44f28465a893f35ba7811a0c4778226272969b0385852056f2c54c11e6ef8416f81b0",
+    "createdAt": "2026-07-05T08:08:53.309Z",
+    "updatedAt": "2026-07-05T08:08:53.310Z"
+  }
+}

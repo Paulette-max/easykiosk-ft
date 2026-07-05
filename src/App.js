@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { 
   ClerkProvider, 
-  SignInButton, 
-  SignUpButton, 
   UserButton, 
   useAuth,
+  useClerk,
   useUser,
   RedirectToSignIn
 } from '@clerk/react';
@@ -168,6 +167,24 @@ function LandingPage({ onAdminSignedIn, initialEntryMode = 'choose' }) {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const { isSignedIn } = useAuth();
+  const { openSignIn, openSignUp } = useClerk();
+
+  const handleUserSignIn = () => {
+    if (isSignedIn) {
+      return;
+    }
+
+    openSignIn();
+  };
+
+  const handleUserSignUp = () => {
+    if (isSignedIn) {
+      return;
+    }
+
+    openSignUp();
+  };
 
   const handleAdminSubmit = async (event) => {
     event.preventDefault();
@@ -203,7 +220,7 @@ function LandingPage({ onAdminSignedIn, initialEntryMode = 'choose' }) {
           <div className="entry-choice-grid">
             <button type="button" className="entry-choice" onClick={() => setEntryMode('user')}>
               <span className="entry-choice-kicker">Staff or customer</span>
-              <strong>Regular user login</strong>
+              <strong>Kiosk Owner Access</strong>
               <small>Go to the Clerk sign in and sign up flow.</small>
             </button>
             <button type="button" className="entry-choice entry-choice-admin" onClick={() => setEntryMode('admin')}>
@@ -218,13 +235,14 @@ function LandingPage({ onAdminSignedIn, initialEntryMode = 'choose' }) {
           <div className="entry-panel">
             <p className="entry-panel-title">Continue as a regular user</p>
             <div className="entry-actions">
-              <SignInButton mode="modal">
-                <button className="btn btn-primary entry-action-btn">Sign In</button>
-              </SignInButton>
-              <SignUpButton mode="modal">
-                <button className="btn entry-action-btn">Sign Up</button>
-              </SignUpButton>
+              <button type="button" className="btn btn-primary entry-action-btn" onClick={handleUserSignIn} disabled={isSignedIn}>
+                Sign In
+              </button>
+              <button type="button" className="btn entry-action-btn" onClick={handleUserSignUp} disabled={isSignedIn}>
+                Sign Up
+              </button>
             </div>
+            {isSignedIn && <div className="form-error">You are already signed in. Open the dashboard or sign out before using another account.</div>}
             <button type="button" className="entry-back" onClick={() => setEntryMode('choose')}>
               Back
             </button>
@@ -753,50 +771,70 @@ function Products() {
   const [filterCat, setFilterCat] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
   const { getToken } = useAuth();
   const [formData, setFormData] = useState({
     name: '', sku: '', catId: '', supplierId: '', price: 0, cost: 0, stock: 0, threshold: 10, unit: 'pcs'
   });
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, []);
 
 
   const fetchData = async () => {
-    const token = await getToken();
+    setIsLoading(true);
+    setError('');
 
-const [pRes, cRes, sRes] = await Promise.all([
-    axios.get(`${API_URL}/products`, {
-        headers: {
+    try {
+      const token = await getToken();
+
+      const [pRes, cRes, sRes] = await Promise.all([
+        axios.get(`${API_URL}/products`, {
+          headers: {
             Authorization: `Bearer ${token}`,
-        },
-    }),
-    axios.get(`${API_URL}/categories`, {
-    headers: {
-        Authorization: `Bearer ${token}`,
-    },
-}),
-    axios.get(`${API_URL}/suppliers`, {
-    headers: {
-        Authorization: `Bearer ${token}`,
-    },
-})
-]);
-    setProducts(pRes.data);
-    setSuppliers(sRes.data);
-    setCategories(cRes.data);
+          },
+        }),
+        axios.get(`${API_URL}/categories`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        axios.get(`${API_URL}/suppliers`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+      ]);
+
+      setProducts(pRes.data);
+      setSuppliers(sRes.data);
+      setCategories(cRes.data);
+    } catch (requestError) {
+      console.error('Products fetch error:', requestError);
+      setError(requestError.response?.data?.error || 'Unable to load products right now. Check that the API server is running.');
+      setProducts([]);
+      setSuppliers([]);
+      setCategories([]);
+    } finally {
+      setIsLoading(false);
+    }
   }; 
 
   const handleDelete = async (id) => {
     if (window.confirm('Delete this product?')) {
-      const token = await getToken();
-      await axios.delete(`${API_URL}/products/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      fetchData();
+      try {
+        const token = await getToken();
+        await axios.delete(`${API_URL}/products/${id}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        await fetchData();
+      } catch (requestError) {
+        alert(requestError.response?.data?.error || 'Unable to delete this product.');
+      }
     }
   };
 
@@ -821,22 +859,32 @@ const config = {
 };
 
 if (editingId) {
-  await axios.put(
-    `${API_URL}/products/${editingId}`,
-    payload,
-    config
-  );
+  try {
+    await axios.put(
+      `${API_URL}/products/${editingId}`,
+      payload,
+      config
+    );
+  } catch (requestError) {
+    alert(requestError.response?.data?.error || 'Unable to update this product.');
+    return;
+  }
 } else {
-  await axios.post(
-    `${API_URL}/products`,
-    payload,
-    config
-  );
+  try {
+    await axios.post(
+      `${API_URL}/products`,
+      payload,
+      config
+    );
+  } catch (requestError) {
+    alert(requestError.response?.data?.error || 'Unable to create this product.');
+    return;
+  }
 }
     setShowModal(false);
     setEditingId(null);
     setFormData({ name: '', sku: '', catId: '', supplierId: '', price: 0, cost: 0, stock: 0, threshold: 10, unit: 'pcs' });
-    fetchData();
+    await fetchData();
   };
 
   const filteredProducts = products.filter(p => {
@@ -853,6 +901,7 @@ if (editingId) {
         <button className="btn btn-primary" onClick={() => { setEditingId(null); setShowModal(true); }}>+ Add Product</button>
       </div>
       <div className="card">
+        {error && <div className="alert-banner admin-alert">{error}</div>}
         <div className="search-bar">
           <input placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} />
           <select value={filterCat} onChange={e => setFilterCat(e.target.value)}>
@@ -860,34 +909,38 @@ if (editingId) {
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Product</th><th>SKU</th><th>Category</th><th>Supplier</th><th>Stock</th><th>Price</th><th>Status</th><th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredProducts.map(p => (
-              <tr key={p.id}>
-                <td><strong>{p.name}</strong></td>
-                <td>{p.sku}</td>
-                <td>{p.category?.name || '-'}</td>
-                <td>{p.supplier?.name || '-'}</td>
-                <td>{p.stock} {p.unit}</td>
-                <td>KES {p.price}</td>
-                <td>
-                  <span className={`badge ${p.stock <= p.threshold ? 'badge-danger' : 'badge-success'}`}>
-                    {p.stock <= p.threshold ? 'Low Stock' : 'In Stock'}
-                  </span>
-                </td>
-                <td>
-                  <button className="btn btn-sm" onClick={() => { setEditingId(p.id); setFormData(p); setShowModal(true); }}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p.id)}>Del</button>
-                </td>
+        {isLoading ? (
+          <div className="empty">Loading products...</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Product</th><th>SKU</th><th>Category</th><th>Supplier</th><th>Stock</th><th>Price</th><th>Status</th><th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filteredProducts.map(p => (
+                <tr key={p.id}>
+                  <td><strong>{p.name}</strong></td>
+                  <td>{p.sku}</td>
+                  <td>{p.category?.name || '-'}</td>
+                  <td>{p.supplier?.name || '-'}</td>
+                  <td>{p.stock} {p.unit}</td>
+                  <td>KES {p.price}</td>
+                  <td>
+                    <span className={`badge ${p.stock <= p.threshold ? 'badge-danger' : 'badge-success'}`}>
+                      {p.stock <= p.threshold ? 'Low Stock' : 'In Stock'}
+                    </span>
+                  </td>
+                  <td>
+                    <button className="btn btn-sm" onClick={() => { setEditingId(p.id); setFormData(p); setShowModal(true); }}>Edit</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p.id)}>Del</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {showModal && (
@@ -1244,62 +1297,84 @@ function Categories() {
   const [categories, setCategories] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
   const { getToken } = useAuth();
   const [formData, setFormData] = useState({ name: '', description: '' });
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, []);
 
   const fetchData = async () => {
-    const token = await getToken();
+    setIsLoading(true);
+    setError('');
 
-  const res = await axios.get(`${API_URL}/categories`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+    try {
+      const token = await getToken();
 
-  setCategories(res.data);
-};
+      const res = await axios.get(`${API_URL}/categories`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      setCategories(res.data);
+    } catch (requestError) {
+      console.error('Categories fetch error:', requestError);
+      setCategories([]);
+      setError(requestError.response?.data?.error || 'Unable to load categories right now. Check that the API server is running.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleDelete = async (id) => {
-    const token = await getToken();
     if (window.confirm('Delete this category?')) {
-      await axios.delete(`${API_URL}/categories/${id}`, {
-        headers:{
-            Authorization:`Bearer ${token}`
-        }
-    });
-      fetchData();
+      try {
+        const token = await getToken();
+        await axios.delete(`${API_URL}/categories/${id}`, {
+          headers:{
+              Authorization:`Bearer ${token}`
+          }
+      });
+        await fetchData();
+      } catch (requestError) {
+        alert(requestError.response?.data?.error || 'Unable to delete this category.');
+      }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-  const token = await getToken();
+  try {
+    const token = await getToken();
 
-  if (editingId) {
-    await axios.put(
-      `${API_URL}/categories/${editingId}`,
-      formData,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-  } else {
-    await axios.post(
-      `${API_URL}/categories`,
-      formData,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
+    if (editingId) {
+      await axios.put(
+        `${API_URL}/categories/${editingId}`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+    } else {
+      await axios.post(
+        `${API_URL}/categories`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+    }
+  } catch (requestError) {
+    alert(requestError.response?.data?.error || 'Unable to save this category.');
+    return;
   }
 
   setShowModal(false);
@@ -1309,7 +1384,7 @@ function Categories() {
     description: "",
   });
 
-  fetchData();
+  await fetchData();
   };
 
   return (
@@ -1318,21 +1393,26 @@ function Categories() {
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Add Category</button>
       </div>
       <div className="card">
-        <table className="table">
-          <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
-          <tbody>
-            {categories.map(c => (
-              <tr key={c.id}>
-                <td><strong>{c.name}</strong></td>
-                <td>{c.description}</td>
-                <td>
-                  <button className="btn btn-sm" onClick={() => { setEditingId(c.id); setFormData(c); setShowModal(true); }}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(c.id)}>Del</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {error && <div className="alert-banner admin-alert">{error}</div>}
+        {isLoading ? (
+          <div className="empty">Loading categories...</div>
+        ) : (
+          <table className="table">
+            <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
+            <tbody>
+              {categories.map(c => (
+                <tr key={c.id}>
+                  <td><strong>{c.name}</strong></td>
+                  <td>{c.description}</td>
+                  <td>
+                    <button className="btn btn-sm" onClick={() => { setEditingId(c.id); setFormData(c); setShowModal(true); }}>Edit</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(c.id)}>Del</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
       {showModal && (
         <div className="modal-bg" onClick={() => setShowModal(false)}>
@@ -1491,31 +1571,48 @@ if (editingId) {
 
 function Alerts() {
   const [lowStockItems, setLowStockItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
   const { getToken } = useAuth();
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, []);
 
   const fetchData = async () => {
-    const token = await getToken();
+    setIsLoading(true);
+    setError('');
 
-    const res = await axios.get(
-    `${API_URL}/products`,
-    {
-        headers:{
-            Authorization:`Bearer ${token}`
+    try {
+      const token = await getToken();
+
+      const res = await axios.get(
+        `${API_URL}/products`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
         }
+      );
+
+      const low = res.data.filter(p => p.stock <= p.threshold);
+      setLowStockItems(low);
+    } catch (requestError) {
+      console.error('Alerts fetch error:', requestError);
+      setLowStockItems([]);
+      setError(requestError.response?.data?.error || 'Unable to load low stock alerts right now. Check that the API server is running.');
+    } finally {
+      setIsLoading(false);
     }
-);
-    const low = res.data.filter(p => p.stock <= p.threshold);
-    setLowStockItems(low);
   };
 
   return (
     <div>
       <h2>Low Stock Alerts</h2>
-      {lowStockItems.length === 0 ? (
+      {error && <div className="alert-banner admin-alert">{error}</div>}
+      {isLoading ? (
+        <div className="empty">Loading low stock alerts...</div>
+      ) : lowStockItems.length === 0 ? (
         <div className="empty">All products are well-stocked!</div>
       ) : (
         <div className="card">
