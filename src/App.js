@@ -293,14 +293,17 @@ function AdminConsole({ session, onSignOut }) {
   return (
     <div className="app admin-app">
       <div className="sidebar admin-sidebar">
-        <div className="logo">Easy<span>Kiosk</span></div>
+        <div className="logo">
+          <img className="logo-image" src="/est.png" alt="EasyKiosk" />
+          <span className="logo-text">EasyKiosk</span>
+        </div>
         <div className="admin-badge">Admin console</div>
         <nav>
           <div className="nav-item active">
-            <span>👥</span> Users
+            Users
           </div>
           <div className="nav-item" onClick={onSignOut} role="button" tabIndex={0}>
-            <span>↩</span> Sign out
+            Sign out
           </div>
         </nav>
       </div>
@@ -625,18 +628,21 @@ useEffect(() => {
 
 function Sidebar({ activePage, setActivePage }) {
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'products', label: 'Products', icon: '📦' },
-    { id: 'stock', label: 'Stock Movements', icon: '🔄' },
-    { id: 'sales', label: 'Sales', icon: '🧾' },
-    { id: 'categories', label: 'Categories', icon: '🏷️' },
-    { id: 'suppliers', label: 'Suppliers', icon: '🚚' },
-    { id: 'alerts', label: 'Low Stock Alerts', icon: '🔔' },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'products', label: 'Products' },
+    { id: 'stock', label: 'Stock Movements' },
+    { id: 'sales', label: 'Sales' },
+    { id: 'categories', label: 'Categories' },
+    { id: 'suppliers', label: 'Suppliers' },
+    { id: 'alerts', label: 'Low Stock Alerts' },
   ];
 
   return (
     <div className="sidebar">
-      <div className="logo">Easy<span>Kiosk</span></div>
+      <div className="logo">
+        <img className="logo-image" src="/est.png" alt="EasyKiosk" />
+        <span className="logo-text">EasyKiosk</span>
+      </div>
       <nav>
         {menuItems.map(item => (
           <div
@@ -644,7 +650,7 @@ function Sidebar({ activePage, setActivePage }) {
             className={`nav-item ${activePage === item.id ? 'active' : ''}`}
             onClick={() => setActivePage(item.id)}
           >
-            <span>{item.icon}</span> {item.label}
+            {item.label}
           </div>
         ))}
       </nav>
