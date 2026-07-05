@@ -612,6 +612,7 @@ useEffect(() => {
         
         <div className="content">
           {activePage === 'dashboard' && <Dashboard />}
+          {activePage === 'reports' && <Reports />}
           {activePage === 'products' && <Products />}
           {activePage === 'stock' && <StockMoves />}
           {activePage === 'sales' && <Sales />}
@@ -629,6 +630,7 @@ useEffect(() => {
 function Sidebar({ activePage, setActivePage }) {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'reports', label: 'Reports' },
     { id: 'products', label: 'Products' },
     { id: 'stock', label: 'Stock Movements' },
     { id: 'sales', label: 'Sales' },
@@ -707,7 +709,7 @@ function Dashboard() {
   };
 
   return (
-    <div className="dashboard">
+    <div className="dashboard dashboard-page">
       {stats.lowStockCount > 0 && (
         <div className="alert-banner">
           ⚠️ {stats.lowStockCount} product(s) running low on stock
@@ -768,6 +770,149 @@ function Dashboard() {
     </div>
   );
 } 
+
+function Reports() {
+  const [products, setProducts] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const { getToken } = useAuth();
+
+  useEffect(() => {
+    void fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const [productsRes, salesRes] = await Promise.all([
+        axios.get(`${API_URL}/products`, { headers }),
+        axios.get(`${API_URL}/sales`, { headers }),
+      ]);
+
+      setProducts(Array.isArray(productsRes.data) ? productsRes.data : []);
+      setSales(Array.isArray(salesRes.data) ? salesRes.data : []);
+    } catch (requestError) {
+      console.error('Reports fetch error:', requestError);
+      setError(requestError.response?.data?.error || 'Unable to load reports right now.');
+      setProducts([]);
+      setSales([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const revenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+  const costOfGoods = sales.reduce((sum, sale) => {
+    const product = products.find((item) => item.id === sale.productId);
+    return sum + (product ? Number(product.cost || 0) * Number(sale.qty || 0) : 0);
+  }, 0);
+  const grossProfit = revenue - costOfGoods;
+  const lowStockItems = products.filter((product) => Number(product.stock || 0) <= Number(product.threshold || 0));
+
+  const topProducts = sales.reduce((summary, sale) => {
+    const product = products.find((item) => item.id === sale.productId);
+    const name = product ? product.name : sale.productName || 'Unknown';
+    const current = summary.get(name) || { name, qty: 0, total: 0 };
+
+    current.qty += Number(sale.qty || 0);
+    current.total += Number(sale.total || 0);
+    summary.set(name, current);
+    return summary;
+  }, new Map());
+
+  const rankedProducts = Array.from(topProducts.values())
+    .sort((left, right) => right.total - left.total)
+    .slice(0, 5);
+
+  return (
+    <div className="reports-page">
+      {error && <div className="alert-banner admin-alert">{error}</div>}
+
+      <div className="metrics admin-metrics">
+        <div className="metric success">
+          <div className="metric-label">Revenue</div>
+          <div className="metric-value">KES {revenue.toLocaleString()}</div>
+        </div>
+        <div className="metric">
+          <div className="metric-label">Gross Profit</div>
+          <div className="metric-value">KES {grossProfit.toLocaleString()}</div>
+        </div>
+        <div className="metric alert">
+          <div className="metric-label">Low Stock Items</div>
+          <div className="metric-value">{lowStockItems.length}</div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="empty">Loading reports...</div>
+      ) : (
+        <div className="dashboard-grid">
+          <div className="card">
+            <h3>Top Selling Products</h3>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Qty Sold</th>
+                  <th>Sales Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankedProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan="3">No sales data available yet.</td>
+                  </tr>
+                ) : (
+                  rankedProducts.map((item) => (
+                    <tr key={item.name}>
+                      <td><strong>{item.name}</strong></td>
+                      <td>{item.qty}</td>
+                      <td>KES {item.total.toLocaleString()}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card">
+            <h3>Stock Watch</h3>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Stock</th>
+                  <th>Threshold</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lowStockItems.length === 0 ? (
+                  <tr>
+                    <td colSpan="3">No low stock items at the moment.</td>
+                  </tr>
+                ) : (
+                  lowStockItems.map((product) => (
+                    <tr key={product.id}>
+                      <td><strong>{product.name}</strong></td>
+                      <td style={{ color: '#E24B4A', fontWeight: 'bold' }}>{product.stock}</td>
+                      <td>{product.threshold}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Products() {
   const [products, setProducts] = useState([]);
