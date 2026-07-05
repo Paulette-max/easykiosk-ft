@@ -578,7 +578,7 @@ function AppContent({ onAdminAccess }) {
     try {
       const token = await getToken(); // From useAuth()
       // Try to fetch admin users. If fails, user isn't admin.
-      await axios.get(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${token}` } });
+      await axios.get(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${'token'}` } });
       setShowAdmin(true);
     } catch (err) {
       alert('You do not have admin privileges.');
