@@ -13,118 +13,39 @@ import './App.css';
 
 
 const queryClient = new QueryClient();
-
 const API_URL = "http://localhost:5000/api";
-const ADMIN_SESSION_STORAGE_KEY = 'easykiosk_admin_session';
-const ADMIN_API_URL = `${API_URL}/admin`;
 
-function loadAdminSession() {
-  try {
-    const storedSession = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
-    return storedSession ? JSON.parse(storedSession) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveAdminSession(session) {
-  window.localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(session));
-}
-
-function clearAdminSession() {
-  window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
-}
-
-function buildAdminHeaders(token) {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+// --- HELPER FUNCTIONS ---
 
 function formatDate(value) {
-  if (!value) {
-    return '-';
-  }
-
+  if (!value) return '-';
   const parsedDate = new Date(value);
-
   return Number.isNaN(parsedDate.getTime()) ? '-' : parsedDate.toLocaleString();
 }
 
-function getUserDisplayName(user) {
-  return user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'Admin';
-}
-
-function isAdministratorUser(user) {
-  const roleValue = user?.publicMetadata?.role || user?.unsafeMetadata?.role || user?.publicMetadata?.isAdmin;
-
-  return roleValue === 'admin' || roleValue === true || roleValue === 'true';
-}
-
-
 // --- AUTH GUARD COMPONENT ---
-// This wraps the main app content. If the user isn't signed in, it redirects to sign-in.
 const ProtectedRoute = ({ children }) => {
   const { isLoaded, isSignedIn } = useAuth();
-  const queryClient = useQueryClient(); 
+  const queryClientInstance = useQueryClient(); 
   
   useEffect(() => {
     if (!isSignedIn) {
-      queryClient.clear(); // React Query
+      queryClientInstance.clear(); 
     }
-  }, [isSignedIn, queryClient]);
+  }, [isSignedIn, queryClientInstance]);
 
   if (!isLoaded) {
     return <div className="app" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
   }
 
   if (!isSignedIn) {
-    // Redirect to Clerk's hosted sign-in page
     return <RedirectToSignIn />;
   }
 
   return children;
-
-  
 };
 
-function ProtectedApp({ onAdminAccess }) {
-  const { userId } = useAuth();
-
-  return <AppContent key={userId} onAdminAccess={onAdminAccess} />;
-}
-
-function AppShell() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
-  const { user } = useUser();
-  const [adminSession, setAdminSession] = useState(() => loadAdminSession());
-  const [adminEntryMode, setAdminEntryMode] = useState('none');
-
-  useEffect(() => {
-    if (adminSession) {
-      saveAdminSession(adminSession);
-    } else {
-      clearAdminSession();
-    }
-  }, [adminSession]);
-
-    if (!isLoaded) {
-    return <div className="app loading-screen">Loading...</div>;
-  }
-
-  if (!isSignedIn) {
-    // Simple landing page with just Sign In / Sign Up
-    return <LandingPageSimple />;
-  }
-
-  // If signed in, go to main app. We can add an "Admin" link in the sidebar/topbar
-  // that fetches admin users IF they are authorized.
-  return (
-    <ProtectedRoute>
-      <AppContent />
-    </ProtectedRoute>
-  );
-}
-
-// Simple Landing Page without Admin Choice
+// --- SIMPLE LANDING PAGE (Public) ---
 function LandingPageSimple() {
   const { openSignIn, openSignUp } = useClerk();
   
@@ -140,175 +61,11 @@ function LandingPageSimple() {
   );
 }
 
-// --- LANDING PAGE (Public) ---
-function LandingPage({ onAdminSignedIn, initialEntryMode = 'choose' }) {
-  const [entryMode, setEntryMode] = useState(initialEntryMode);
-  const [credentials, setCredentials] = useState({ username: '', password: '' });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const { isSignedIn } = useAuth();
-  const { openSignIn, openSignUp } = useClerk();
-
-  const handleUserSignIn = () => {
-    if (isSignedIn) {
-      return;
-    }
-
-    openSignIn();
-  };
-
-  const handleUserSignUp = () => {
-    if (isSignedIn) {
-      return;
-    }
-
-    openSignUp();
-  };
-
-  const handleAdminSubmit = async (event) => {
-    event.preventDefault();
-    setIsSubmitting(true);
-    setError('');
-
-    try {
-      const response = await axios.post(`${ADMIN_API_URL}/login`, credentials);
-      const session = {
-        token: response.data?.token || response.data?.accessToken || '',
-        username: response.data?.username || credentials.username,
-        role: 'admin'
-      };
-
-      onAdminSignedIn(session);
-    } catch (requestError) {
-      setError(requestError.response?.data?.error || 'Unable to sign in as admin. Check the username and password.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="entry-screen">
-      <div className="entry-card">
-        <div className="entry-brand">
-          <div className="entry-mark">EasyKiosk</div>
-          <h1>Inventory management for the whole kiosk team</h1>
-          <p>Choose your access path first, then sign in with the right account type.</p>
-        </div>
-
-        {entryMode === 'choose' && (
-          <div className="entry-choice-grid">
-            <button type="button" className="entry-choice" onClick={() => setEntryMode('user')}>
-              <span className="entry-choice-kicker">Staff or customer</span>
-              <strong>Kiosk Owner Access</strong>
-              <small>Go to the Clerk sign in and sign up flow.</small>
-            </button>
-            <button type="button" className="entry-choice entry-choice-admin" onClick={() => setEntryMode('admin')}>
-              <span className="entry-choice-kicker">Management</span>
-              <strong>Admin access</strong>
-              <small>Enter the admin username and password to manage users.</small>
-            </button>
-          </div>
-        )}
-
-        {entryMode === 'user' && (
-          <div className="entry-panel">
-            <p className="entry-panel-title">Continue as a regular user</p>
-            <div className="entry-actions">
-              <button type="button" className="btn btn-primary entry-action-btn" onClick={handleUserSignIn} disabled={isSignedIn}>
-                Sign In
-              </button>
-              <button type="button" className="btn entry-action-btn" onClick={handleUserSignUp} disabled={isSignedIn}>
-                Sign Up
-              </button>
-            </div>
-            {isSignedIn && <div className="form-error">You are already signed in. Open the dashboard or sign out before using another account.</div>}
-            <button type="button" className="entry-back" onClick={() => setEntryMode('choose')}>
-              Back
-            </button>
-          </div>
-        )}
-
-        {entryMode === 'admin' && (
-          <form className="entry-panel entry-form" onSubmit={handleAdminSubmit}>
-            <p className="entry-panel-title">Admin sign in</p>
-            <div className="form-group">
-              <label className="form-label">Admin username</label>
-              <input
-                required
-                autoComplete="username"
-                value={credentials.username}
-                onChange={(event) => setCredentials({ ...credentials, username: event.target.value })}
-                placeholder="Enter admin username"
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Admin password</label>
-              <input
-                required
-                type="password"
-                autoComplete="current-password"
-                value={credentials.password}
-                onChange={(event) => setCredentials({ ...credentials, password: event.target.value })}
-                placeholder="Enter admin password"
-              />
-            </div>
-            {error && <div className="form-error">{error}</div>}
-            <div className="entry-actions">
-              <button type="submit" className="btn btn-primary entry-action-btn" disabled={isSubmitting}>
-                {isSubmitting ? 'Signing in...' : 'Enter admin console'}
-              </button>
-            </div>
-            <button type="button" className="entry-back" onClick={() => setEntryMode('choose')}>
-              Back
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AdminConsole({ session, onSignOut }) {
-  return (
-    <div className="app admin-app">
-      <div className="sidebar admin-sidebar">
-        <div className="logo">
-          <img className="logo-image" src="/est.png" alt="EasyKiosk" />
-          <span className="logo-text">EasyKiosk</span>
-        </div>
-        <div className="admin-badge">Admin console</div>
-        <nav>
-          <div className="nav-item active">
-            Users
-          </div>
-          <div className="nav-item" onClick={onSignOut} role="button" tabIndex={0}>
-            Sign out
-          </div>
-        </nav>
-      </div>
-
-      <div className="main">
-        <div className="topbar">
-          <div>
-            <div className="topbar-title">Admin users</div>
-            <div className="topbar-subtitle">Signed in as {session.username}</div>
-          </div>
-          <button className="btn" onClick={onSignOut}>Sign out</button>
-        </div>
-
-        <div className="content">
-          <AdminUsersPanel session={session} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminUsersPanel({session }) {
+// --- ADMIN PANEL COMPONENT ---
+function AdminUsersPanel({ onClose }) {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -322,6 +79,9 @@ function AdminUsersPanel({session }) {
   }, []);
 
   const fetchUsers = async () => {
+    setIsLoading(true);
+    setError('');
+
     try {
       const token = await getToken();
       const response = await axios.get(`${API_URL}/admin/users`, {
@@ -330,13 +90,14 @@ function AdminUsersPanel({session }) {
       setUsers(response.data);
     } catch (err) {
       console.error(err);
-      // Handle error
+      if (err.response?.status === 403) {
+        setError('You do not have permission to view this page.');
+      } else {
+        setError('Failed to load users. Please try again later.');
+      }
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  const refreshUsers = async () => {
-    setIsRefreshing(true);
-    await fetchUsers();
   };
 
   const openUserDetails = async (user) => {
@@ -345,17 +106,18 @@ function AdminUsersPanel({session }) {
 
     try {
       const token = await getToken();
-      const response = await axios.get(`${API_URL}/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setUsers(response.data);
+      const response = await axios.get(`${API_URL}/admin/users/${user.id}`, {
+        headers: { Authorization: `Bearer ${token}` } 
+      }); 
+      setSelectedUser(response.data);
     } catch (err) {
       console.error(err);
-      // Handle error
+    } finally {
+      setDetailsLoading(false);
     }
   };
 
-    const updateUserStatus = async (user, action) => {
+  const updateUserStatus = async (user, action) => {
     const confirmationMessage = action === 'delete'
       ? `Delete ${user.name || user.email || 'this user'}?`
       : `${action === 'deactivate' ? 'Deactivate' : 'Reactivate'} ${user.name || user.email || 'this user'}?`;
@@ -367,17 +129,13 @@ function AdminUsersPanel({session }) {
     setActionId(user.id);
 
     try {
-      // Ensure session.token is used for BOTH requests
-      const headers = buildAdminHeaders(session.token);
+      const token = await getToken();
+      const headers = { Authorization: `Bearer ${token}` };
 
       if (action === 'delete') {
-        await axios.delete(`${ADMIN_API_URL}/users/${user.id}`, {
-          headers: headers
-        });
+        await axios.delete(`${API_URL}/admin/users/${user.id}`, { headers: headers });
       } else {
-        await axios.patch(`${ADMIN_API_URL}/users/${user.id}/${action}`, {}, {
-          headers: headers
-        });
+        await axios.patch(`${API_URL}/admin/users/${user.id}/${action}`, {}, { headers: headers });
       }
 
       await fetchUsers();
@@ -388,12 +146,10 @@ function AdminUsersPanel({session }) {
     }
   };
 
-
   const filteredUsers = users.filter((user) => {
     const searchableText = `${user.name || ''} ${user.email || ''} ${user.phone || ''}`.toLowerCase();
     const matchesSearch = searchableText.includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' ? true : String(user.status || 'active').toLowerCase() === statusFilter;
-
     return matchesSearch && matchesStatus;
   });
 
@@ -432,9 +188,7 @@ function AdminUsersPanel({session }) {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
-          <button className="btn" onClick={refreshUsers} disabled={isRefreshing}>
-            {isRefreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
+          <button className="btn" onClick={fetchUsers}>Refresh</button>
         </div>
 
         {isLoading ? (
@@ -475,9 +229,7 @@ function AdminUsersPanel({session }) {
                     <td>{formatDate(user.lastLoginAt || user.updatedAt || user.createdAt)}</td>
                     <td>
                       <div className="admin-row-actions">
-                        <button className="btn btn-sm" onClick={() => openUserDetails(user)}>
-                          View
-                        </button>
+                        <button className="btn btn-sm" onClick={() => openUserDetails(user)}>View</button>
                         <button
                           className="btn btn-sm"
                           disabled={actionId === user.id}
@@ -511,45 +263,19 @@ function AdminUsersPanel({session }) {
                 <div className="empty">Loading details...</div>
               ) : (
                 <div className="details-grid">
-                  <div>
-                    <span className="detail-label">Name</span>
-                    <strong>{selectedUser.name || selectedUser.fullName || 'Unnamed user'}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">Email</span>
-                    <strong>{selectedUser.email || '-'}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">Phone</span>
-                    <strong>{selectedUser.phone || '-'}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">Role</span>
-                    <strong>{selectedUser.role || 'User'}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">Status</span>
-                    <strong>{selectedUser.status || 'active'}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">Created</span>
-                    <strong>{formatDate(selectedUser.createdAt)}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">Last login</span>
-                    <strong>{formatDate(selectedUser.lastLoginAt)}</strong>
-                  </div>
-                  <div>
-                    <span className="detail-label">User ID</span>
-                    <strong>{selectedUser.id}</strong>
-                  </div>
+                  <div><span className="detail-label">Name</span><strong>{selectedUser.name || selectedUser.fullName || 'Unnamed user'}</strong></div>
+                  <div><span className="detail-label">Email</span><strong>{selectedUser.email || '-'}</strong></div>
+                  <div><span className="detail-label">Phone</span><strong>{selectedUser.phone || '-'}</strong></div>
+                  <div><span className="detail-label">Role</span><strong>{selectedUser.role || 'User'}</strong></div>
+                  <div><span className="detail-label">Status</span><strong>{selectedUser.status || 'active'}</strong></div>
+                  <div><span className="detail-label">Created</span><strong>{formatDate(selectedUser.createdAt)}</strong></div>
+                  <div><span className="detail-label">Last login</span><strong>{formatDate(selectedUser.lastLoginAt)}</strong></div>
+                  <div><span className="detail-label">User ID</span><strong>{selectedUser.id}</strong></div>
                 </div>
               )}
             </div>
             <div className="modal-footer">
-              <button type="button" className="btn btn-primary" onClick={() => setSelectedUser(null)}>
-                Close
-              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setSelectedUser(null)}>Close</button>
             </div>
           </div>
         </div>
@@ -558,29 +284,20 @@ function AdminUsersPanel({session }) {
   );
 }
 
+
 // --- MAIN APP CONTENT (Protected) ---
-function AppContent({ onAdminAccess }) {
+function AppContent() {
   const [activePage, setActivePage] = useState('dashboard');
-  const { isSignedIn } = useAuth();
-  const queryClient = useQueryClient();
   const [showAdmin, setShowAdmin] = useState(false);
   const { getToken } = useAuth();
 
-
-  
-  useEffect(() => {
-    if (!isSignedIn) {
-        queryClient.clear();
-    }
-  }, [isSignedIn, queryClient]);
-
   const handleAdminClick = async () => {
     try {
-      const token = await getToken(); // From useAuth()
+      const token = await getToken();
       // Try to fetch admin users. If fails, user isn't admin.
-      await axios.get(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${'token'}` } });
+      await axios.get(`${API_URL}/admin/users`, { headers: { Authorization: `Bearer ${token}` } });
       setShowAdmin(true);
-    } catch (err) {
+    } catch (err) { 
       alert('You do not have admin privileges.');
     }
   };
@@ -601,19 +318,18 @@ function AppContent({ onAdminAccess }) {
         
         <div className="content">
           {showAdmin ? (
-             // Render Admin Panel directly here
-             <AdminUsersPanel /> 
+             <AdminUsersPanel onClose={() => setShowAdmin(false)} /> 
           ) : (
             <>
-          {activePage === 'dashboard' && <Dashboard />}
-          {activePage === 'reports' && <Reports />}
-          {activePage === 'products' && <Products />}
-          {activePage === 'stock' && <StockMoves />}
-          {activePage === 'sales' && <Sales />}
-          {activePage === 'categories' && <Categories />}
-          {activePage === 'suppliers' && <Suppliers />}
-          {activePage === 'alerts' && <Alerts />}
-          </>
+              {activePage === 'dashboard' && <Dashboard />}
+              {activePage === 'reports' && <Reports />}
+              {activePage === 'products' && <Products />}
+              {activePage === 'stock' && <StockMoves />}
+              {activePage === 'sales' && <Sales />}
+              {activePage === 'categories' && <Categories />}
+              {activePage === 'suppliers' && <Suppliers />}
+              {activePage === 'alerts' && <Alerts />}
+            </>
           )}
         </div>
       </div>
@@ -622,8 +338,7 @@ function AppContent({ onAdminAccess }) {
 } 
 
 
-// --- EXISTING COMPONENTS (Unchanged Logic) ---
-
+// --- SIDEBAR ---
 function Sidebar({ activePage, setActivePage }) {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -647,7 +362,11 @@ function Sidebar({ activePage, setActivePage }) {
           <div
             key={item.id}
             className={`nav-item ${activePage === item.id ? 'active' : ''}`}
-            onClick={() => setActivePage(item.id)}
+            onClick={() => {
+              setActivePage(item.id);
+              // Optional: Close admin panel when navigating elsewhere
+              // You might want to lift showAdmin state up if you want nav clicks to close it
+            }}
           >
             {item.label}
           </div>
@@ -657,6 +376,7 @@ function Sidebar({ activePage, setActivePage }) {
   );
 }
 
+// --- DASHBOARD ---
 function Dashboard() {
   const [stats, setStats] = useState({ revenue: 0, profit: 0, stockValue: 0, lowStockCount: 0 });
   const [recentSales, setRecentSales] = useState([]);
@@ -768,6 +488,7 @@ function Dashboard() {
   );
 } 
 
+// --- REPORTS ---
 function Reports() {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
@@ -804,6 +525,52 @@ function Reports() {
     }
   };
 
+  // --- DOWNLOAD CSV FUNCTION ---
+  const downloadReportCSV = () => {
+    if (!sales.length) return;
+
+    // Define CSV headers
+    const headers = ['Date', 'Product Name', 'Customer', 'Quantity', 'Price per Unit', 'Total'];
+    
+    // Convert sales data to CSV rows
+    const csvRows = sales.map(sale => {
+      const product = products.find(p => p.id === sale.productId);
+      const productName = product ? product.name : (sale.productName || 'Unknown');
+      
+      // Escape commas and quotes in strings to prevent CSV breaking
+      const escapeCell = (val) => {
+        const str = String(val ?? '');
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
+
+      return [
+        new Date(sale.date).toLocaleDateString(),
+        escapeCell(productName),
+        escapeCell(sale.customer || ''),
+        sale.qty,
+        sale.price,
+        sale.total
+      ].join(',');
+    });
+
+    // Combine headers and rows
+    const csvContent = [headers.join(','), ...csvRows].join('\n');
+    
+    // Create blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `easykiosk_sales_report_${new Date().toISOString().split('T')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const revenue = sales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
   const costOfGoods = sales.reduce((sum, sale) => {
     const product = products.find((item) => item.id === sale.productId);
@@ -830,6 +597,19 @@ function Reports() {
   return (
     <div className="reports-page">
       {error && <div className="alert-banner admin-alert">{error}</div>}
+
+      {/* ADD DOWNLOAD BUTTON HERE */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h2>Sales Reports</h2>
+        <button 
+          className="btn btn-primary" 
+          onClick={downloadReportCSV} 
+          disabled={!sales.length}
+          title="Download Sales Data as CSV"
+        >
+           Download Report
+        </button>
+      </div>
 
       <div className="metrics admin-metrics">
         <div className="metric success">
@@ -877,22 +657,19 @@ function Reports() {
               </tbody>
             </table>
           </div>
-
           <div className="card">
-            <h3>Stock Watch</h3>
+            <h3>Low Stock Alert</h3>
             <table className="table">
               <thead>
                 <tr>
                   <th>Product</th>
-                  <th>Stock</th>
+                  <th>Current Stock</th>
                   <th>Threshold</th>
                 </tr>
               </thead>
               <tbody>
                 {lowStockItems.length === 0 ? (
-                  <tr>
-                    <td colSpan="3">No low stock items at the moment.</td>
-                  </tr>
+                   <tr><td colSpan="3">All items well stocked!</td></tr>
                 ) : (
                   lowStockItems.map((product) => (
                     <tr key={product.id}>
@@ -911,6 +688,8 @@ function Reports() {
   );
 }
 
+
+// --- PRODUCTS ---
 function Products() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -923,13 +702,12 @@ function Products() {
   const [error, setError] = useState('');
   const { getToken } = useAuth();
   const [formData, setFormData] = useState({
-    name: '', sku: '', catId: '', supplierId: '', price: 0, cost: 0, stock: 0, threshold: 10, unit: 'pcs'
+    name: '', catId: '', supplierId: '', price: 0, stock: 0, threshold: 10, unit: 'pcs'
   });
 
   useEffect(() => {
     void fetchData();
   }, []);
-
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -939,21 +717,9 @@ function Products() {
       const token = await getToken();
 
       const [pRes, cRes, sRes] = await Promise.all([
-        axios.get(`${API_URL}/products`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        axios.get(`${API_URL}/categories`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        axios.get(`${API_URL}/suppliers`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
+        axios.get(`${API_URL}/products`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API_URL}/categories`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API_URL}/suppliers`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
 
       setProducts(pRes.data);
@@ -961,7 +727,7 @@ function Products() {
       setCategories(cRes.data);
     } catch (requestError) {
       console.error('Products fetch error:', requestError);
-      setError(requestError.response?.data?.error || 'Unable to load products right now. Check that the API server is running.');
+      setError(requestError.response?.data?.error || 'Unable to load products.');
       setProducts([]);
       setSuppliers([]);
       setCategories([]);
@@ -974,11 +740,7 @@ function Products() {
     if (window.confirm('Delete this product?')) {
       try {
         const token = await getToken();
-        await axios.delete(`${API_URL}/products/${id}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        await axios.delete(`${API_URL}/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
         await fetchData();
       } catch (requestError) {
         alert(requestError.response?.data?.error || 'Unable to delete this product.');
@@ -993,46 +755,26 @@ function Products() {
       catId: parseInt(formData.catId),
       supplierId: parseInt(formData.supplierId),
       price: parseFloat(formData.price),
-      cost: parseFloat(formData.cost),
       stock: parseInt(formData.stock),
       threshold: parseInt(formData.threshold)
     };
 
     const token = await getToken();
+    const config = { headers: { Authorization: `Bearer ${token}` } };
 
-const config = {
-  headers: {
-    Authorization: `Bearer ${token}`,
-  },
-};
-
-if (editingId) {
-  try {
-    await axios.put(
-      `${API_URL}/products/${editingId}`,
-      payload,
-      config
-    );
-  } catch (requestError) {
-    alert(requestError.response?.data?.error || 'Unable to update this product.');
-    return;
-  }
-} else {
-  try {
-    await axios.post(
-      `${API_URL}/products`,
-      payload,
-      config
-    );
-  } catch (requestError) {
-    alert(requestError.response?.data?.error || 'Unable to create this product.');
-    return;
-  }
-}
-    setShowModal(false);
-    setEditingId(null);
-    setFormData({ name: '', sku: '', catId: '', supplierId: '', price: 0, cost: 0, stock: 0, threshold: 10, unit: 'pcs' });
-    await fetchData();
+    try {
+      if (editingId) {
+        await axios.put(`${API_URL}/products/${editingId}`, payload, config);
+      } else {
+        await axios.post(`${API_URL}/products`, payload, config);
+      }
+      setShowModal(false);
+      setEditingId(null);
+      setFormData({ name: '',  catId: '', supplierId: '', price: 0, stock: 0, threshold: 10, unit: 'pcs' });
+      await fetchData();
+    } catch (requestError) {
+      alert(requestError.response?.data?.error || 'Unable to save product.');
+    }
   };
 
   const filteredProducts = products.filter(p => {
@@ -1040,8 +782,6 @@ if (editingId) {
     const matchesCat = filterCat ? p.catId === parseInt(filterCat) : true;
     return matchesSearch && matchesCat;
   });
-
-  
 
   return (
     <div>
@@ -1070,7 +810,7 @@ if (editingId) {
               {filteredProducts.map(p => (
                 <tr key={p.id}>
                   <td><strong>{p.name}</strong></td>
-                  <td>{p.sku}</td>
+                  
                   <td>{p.category?.name || '-'}</td>
                   <td>{p.supplier?.name || '-'}</td>
                   <td>{p.stock} {p.unit}</td>
@@ -1092,93 +832,72 @@ if (editingId) {
       </div>
 
       {showModal && (
-  <div className="modal-bg" onClick={() => setShowModal(false)}>
-    <div className="modal" onClick={e => e.stopPropagation()}>
-      <h3>{editingId ? 'Edit Product' : 'Add Product'}</h3>
-      <form onSubmit={handleSubmit}>
-        <div className="form-row">
-          <div className="form-group">
-            <label>Name</label>
-            <input required value={formData.name}
-              onChange={e => setFormData({ ...formData, name: e.target.value })} />
-          </div>
-          <div className="form-group">
-            <label>SKU</label>
-            <input value={formData.sku}
-              onChange={e => setFormData({ ...formData, sku: e.target.value })} />
-          </div>
-        </div>
+        <div className="modal-bg" onClick={() => setShowModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>{editingId ? 'Edit Product' : 'Add Product'}</h3>
+            <form onSubmit={handleSubmit}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Name</label>
+                  <input required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+                </div>
+              </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>Category</label>
-            <select value={formData.catId}
-              onChange={e => setFormData({ ...formData, catId: e.target.value })}>
-              <option value="">Select Category</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label>Supplier</label>
-            <select value={formData.supplierId}
-              onChange={e => setFormData({ ...formData, supplierId: e.target.value })}>
-              <option value="">Select Supplier</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-        </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Category</label>
+                  <select value={formData.catId} onChange={e => setFormData({ ...formData, catId: e.target.value })}>
+                    <option value="">Select Category</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Supplier</label>
+                  <select value={formData.supplierId} onChange={e => setFormData({ ...formData, supplierId: e.target.value })}>
+                    <option value="">Select Supplier</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>Price (KES)</label>
-            <input type="number" value={formData.price}
-              onChange={e => setFormData({ ...formData, price: parseFloat(e.target.value) })} />
-          </div>
-          <div className="form-group">
-            <label>Cost (KES)</label>
-            <input type="number" value={formData.cost}
-              onChange={e => setFormData({ ...formData, cost: parseFloat(e.target.value) })} />
-          </div>
-        </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Price (KES)</label>
+                  <input type="number" value={formData.price} onChange={e => setFormData({ ...formData, price: parseFloat(e.target.value) })} />
+                </div>
+              </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>Stock</label>
-            <input type="number" value={formData.stock}
-              onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) })} />
-          </div>
-          <div className="form-group">
-            <label>Threshold</label>
-            <input type="number" value={formData.threshold}
-              onChange={e => setFormData({ ...formData, threshold: parseInt(e.target.value) })} />
-          </div>
-        </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Stock</label>
+                  <input type="number" value={formData.stock} onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) })} />
+                </div>
+                <div className="form-group">
+                  <label>Threshold</label>
+                  <input type="number" value={formData.threshold} onChange={e => setFormData({ ...formData, threshold: parseInt(e.target.value) })} />
+                </div>
+              </div>
 
-        <div className="form-group">
-          <label>Unit</label>
-          <select value={formData.unit}
-            onChange={e => setFormData({ ...formData, unit: e.target.value })}>
-            <option>pcs</option>
-            <option>kg</option>
-            <option>litre</option>
-            <option>pack</option>
-            <option>box</option>
-          </select>
-        </div>
+              <div className="form-group">
+                <label>Unit</label>
+                <select value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })}>
+                  <option>pcs</option><option>kg</option><option>litre</option><option>pack</option><option>box</option>
+                </select>
+              </div>
 
-        <div className="modal-footer">
-          <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
-          <button type="submit" className="btn btn-primary">Save</button>
+              <div className="modal-footer">
+                <button type="button" className="btn" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Save</button>
+              </div>
+            </form>
+          </div>
         </div>
-      </form>
-    </div>
-  </div>
-)}
+      )}
     </div>
   );
 }
 
-
+// --- SALES ---
 function Sales() {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
@@ -1229,7 +948,6 @@ function Sales() {
   };
 
   const totalRevenue = sales.reduce((sum, s) => sum + Number(s.total || 0), 0);
-
 
   return (
     <div>
@@ -1297,8 +1015,7 @@ function Sales() {
   );
 }
 
-
-
+// --- STOCK MOVES ---
 function StockMoves() {
   const [moves, setMoves] = useState([]);
   const [products, setProducts] = useState([]);
@@ -1339,23 +1056,16 @@ function StockMoves() {
   };
 
   const handleDelete = async (id) => {
-  if (!window.confirm("Delete this stock movement?")) return;
-
-  try {
-    const token = await getToken();
-
-    await axios.delete(`${API_URL}/stock-moves/${id}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    fetchData();
-  } catch (err) {
-    console.error(err);
-    alert(err.response?.data?.error || "Failed to delete stock movement");
-  }
-};
+    if (!window.confirm("Delete this stock movement?")) return;
+    try {
+      const token = await getToken();
+      await axios.delete(`${API_URL}/stock-moves/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      fetchData();
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || "Failed to delete stock movement");
+    }
+  };
 
   return (
     <div>
@@ -1368,33 +1078,19 @@ function StockMoves() {
           <tbody>
             {moves.map(m => (
               <tr key={m.id}>
-  <td>{new Date(m.date).toLocaleDateString()}</td>
-
-  <td>{m.productName || "-"}</td>
-
-  <td>
-    <span
-      className={`badge ${
-        m.type === "in" ? "badge-success" : "badge-danger"
-      }`}
-    >
-      {m.type === "in" ? "Stock In" : "Stock Out"}
-    </span>
-  </td>
-
-  <td>{m.qty}</td>
-
-  <td>{m.note}</td>
-
-  <td>
-    <button
-      className="btn btn-sm btn-danger"
-      onClick={() => handleDelete(m.id)}
-    >
-      Delete
-    </button>
-  </td>
-</tr>
+                <td>{new Date(m.date).toLocaleDateString()}</td>
+                <td>{m.productName || "-"}</td>
+                <td>
+                  <span className={`badge ${m.type === "in" ? "badge-success" : "badge-danger"}`}>
+                    {m.type === "in" ? "Stock In" : "Stock Out"}
+                  </span>
+                </td>
+                <td>{m.qty}</td>
+                <td>{m.note}</td>
+                <td>
+                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(m.id)}>Delete</button>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -1441,6 +1137,7 @@ function StockMoves() {
   );
 }
 
+// --- CATEGORIES ---
 function Categories() {
   const [categories, setCategories] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -1460,18 +1157,12 @@ function Categories() {
 
     try {
       const token = await getToken();
-
-      const res = await axios.get(`${API_URL}/categories`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
+      const res = await axios.get(`${API_URL}/categories`, { headers: { Authorization: `Bearer ${token}` } });
       setCategories(res.data);
     } catch (requestError) {
       console.error('Categories fetch error:', requestError);
       setCategories([]);
-      setError(requestError.response?.data?.error || 'Unable to load categories right now. Check that the API server is running.');
+      setError(requestError.response?.data?.error || 'Unable to load categories.');
     } finally {
       setIsLoading(false);
     }
@@ -1481,11 +1172,7 @@ function Categories() {
     if (window.confirm('Delete this category?')) {
       try {
         const token = await getToken();
-        await axios.delete(`${API_URL}/categories/${id}`, {
-          headers:{
-              Authorization:`Bearer ${token}`
-          }
-      });
+        await axios.delete(`${API_URL}/categories/${id}`, { headers: { Authorization: `Bearer ${token}` } });
         await fetchData();
       } catch (requestError) {
         alert(requestError.response?.data?.error || 'Unable to delete this category.');
@@ -1495,44 +1182,20 @@ function Categories() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-  try {
-    const token = await getToken();
-
-    if (editingId) {
-      await axios.put(
-        `${API_URL}/categories/${editingId}`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-    } else {
-      await axios.post(
-        `${API_URL}/categories`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+    try {
+      const token = await getToken();
+      if (editingId) {
+        await axios.put(`${API_URL}/categories/${editingId}`, formData, { headers: { Authorization: `Bearer ${token}` } });
+      } else {
+        await axios.post(`${API_URL}/categories`, formData, { headers: { Authorization: `Bearer ${token}` } });
+      }
+      setShowModal(false);
+      setEditingId(null);
+      setFormData({ name: "", description: "" });
+      await fetchData();
+    } catch (requestError) {
+      alert(requestError.response?.data?.error || 'Unable to save this category.');
     }
-  } catch (requestError) {
-    alert(requestError.response?.data?.error || 'Unable to save this category.');
-    return;
-  }
-
-  setShowModal(false);
-  setEditingId(null);
-  setFormData({
-    name: "",
-    description: "",
-  });
-
-  await fetchData();
   };
 
   return (
@@ -1587,6 +1250,7 @@ function Categories() {
   );
 }
 
+// --- SUPPLIERS ---
 function Suppliers() {
   const [suppliers, setSuppliers] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -1599,59 +1263,43 @@ function Suppliers() {
   }, []);
 
   const fetchData = async () => {
-    const token = await getToken();
-
-const res = await axios.get(
-    `${API_URL}/suppliers`,
-    {
-        headers:{
-            Authorization:`Bearer ${token}`
-        }
+    try {
+      const token = await getToken();
+      const res = await axios.get(`${API_URL}/suppliers`, { headers: { Authorization: `Bearer ${token}` } });
+      setSuppliers(res.data);
+    } catch (err) {
+      console.error(err);
     }
-);
-    setSuppliers(res.data);
   };
 
   const handleDelete = async (id) => {
-  if (window.confirm('Delete this supplier?')) {
-    try {
-      const token = await getToken();
-      await axios.delete(`${API_URL}/suppliers/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-      fetchData();
-    } catch (err) {
-      // Display the specific error message from the backend
-      alert(err.response?.data?.error || 'Error deleting supplier');
+    if (window.confirm('Delete this supplier?')) {
+      try {
+        const token = await getToken();
+        await axios.delete(`${API_URL}/suppliers/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+        fetchData();
+      } catch (err) {
+        alert(err.response?.data?.error || 'Error deleting supplier');
+      }
     }
-  }
-};
-
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     const token = await getToken();
-
-if (editingId) {
-    await axios.put(
-        `${API_URL}/suppliers/${editingId}`,
-        formData,
-        {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        }
-    );
-} else {
-    await axios.post(
-        `${API_URL}/suppliers`,
-        formData,
-        {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        }
-    );
-}
-    fetchData();
+    try {
+      if (editingId) {
+        await axios.put(`${API_URL}/suppliers/${editingId}`, formData, { headers: { Authorization: `Bearer ${token}` } });
+      } else {
+        await axios.post(`${API_URL}/suppliers`, formData, { headers: { Authorization: `Bearer ${token}` } });
+      }
+      fetchData();
+      setShowModal(false);
+      setEditingId(null);
+      setFormData({ name: '', contact: '', phone: '', email: '', addr: '' });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Error saving supplier');
+    }
   };
 
   return (
@@ -1717,6 +1365,7 @@ if (editingId) {
   );
 }
 
+// --- ALERTS ---
 function Alerts() {
   const [lowStockItems, setLowStockItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1733,22 +1382,13 @@ function Alerts() {
 
     try {
       const token = await getToken();
-
-      const res = await axios.get(
-        `${API_URL}/products`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-
+      const res = await axios.get(`${API_URL}/products`, { headers: { Authorization: `Bearer ${token}` } });
       const low = res.data.filter(p => p.stock <= p.threshold);
       setLowStockItems(low);
     } catch (requestError) {
       console.error('Alerts fetch error:', requestError);
       setLowStockItems([]);
-      setError(requestError.response?.data?.error || 'Unable to load low stock alerts right now. Check that the API server is running.');
+      setError(requestError.response?.data?.error || 'Unable to load low stock alerts.');
     } finally {
       setIsLoading(false);
     }
@@ -1784,16 +1424,31 @@ function Alerts() {
 }
 
 // --- ROOT APP EXPORT ---
-function App() {
+function AppShell() {
+  const { isLoaded, isSignedIn } = useAuth();
+
+  if (!isLoaded) {
+    return <div className="app loading-screen">Loading...</div>;
+  }
+
+  if (!isSignedIn) {
+    return <LandingPageSimple />;
+  }
 
   return (
-    
+    <ProtectedRoute>
+      <AppContent />
+    </ProtectedRoute>
+  );
+}
+
+function App() {
+  return (
     <ClerkProvider publishableKey="pk_test_ZGVmaW5pdGUtbWFrby0yMi5jbGVyay5hY2NvdW50cy5kZXYk">
       <QueryClientProvider client={queryClient}>
         <AppShell />
       </QueryClientProvider>
     </ClerkProvider>
-    
   );
 }
 

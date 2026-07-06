@@ -80,8 +80,10 @@ async function isAdmin(clerkUserId) {
     'SELECT * FROM admin_users WHERE clerkUserId = ? AND status = ?',
     [clerkUserId, 'active']
   );
-  return rows.length > 0 && rows.role === 'Admin';
-}
+  
+  // FIX: rows is an array. Check if it has items AND if the FIRST item has role 'Admin'
+  return rows.length > 0 && rows[0].role === 'Admin';
+} 
 
 // Middleware to require Admin Role
 const requireAdmin = async (req, res, next) => {
